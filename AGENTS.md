@@ -73,3 +73,11 @@ cd backend && python seed_categories.py
 - `DEV_USER`: SSH 유저
 - `DEV_SSH_KEY`: SSH 프라이빗 키
 - `DEV_APP_PATH`: 서버 내 앱 경로
+
+## Agent 가이드 (`docs/*_agent.md`)
+작업 영역별 상세 지침은 아래 문서를 참고:
+- [`docs/deploy_agent.md`](docs/deploy_agent.md) — 배포 플로우, Actions/Docker 상태 확인, 오류 대응
+- [`docs/backend_agent.md`](docs/backend_agent.md) — 백엔드 구조, API 컨벤션, 마이그레이션
+- [`docs/frontend_agent.md`](docs/frontend_agent.md) — 프론트엔드 구조, PrimeVue, Pinia
+- [`docs/db_agent.md`](docs/db_agent.md) — DB 스키마, 마이그레이션, 시드 데이터
+- [`docs/auth_agent.md`](docs/auth_agent.md) — Authentik SSO, JWT 인증/인가
