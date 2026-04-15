@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    container_name: itam-backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - backend-data:/app/data
+    ports:
+      - "8818:8818"
+
+  frontend:
+    build: ./frontend
+    container_name: itam-frontend
+    restart: unless-stopped
+    ports:
+      - "9918:80"
+    depends_on:
+      - backend
+    
+volumes:
+  backend-data:
