@@ -62,10 +62,11 @@ curl http://localhost:8818/api/health
 - Frontend: `9918`
 
 ## Secrets (GitHub Repository)
-- `DEV_HOST`: 개발서버 IP
-- `DEV_USER`: SSH 유저
-- `DEV_SSH_KEY`: SSH 프라이빗 키
-- `DEV_APP_PATH`: 서버 내 앱 경로
+- `DEV_SERVER_HOST`: 개발서버 IP
+- `DEV_SERVER_PORT`: SSH 포트
+- `DEV_SERVER_USER`: SSH 유저
+- `DEV_SERVER_SSH_KEY`: SSH 프라이빗 키
+- `DEV_SERVER_PATH`: 서버 내 앱 경로
 
 ## 주의사항
 - 절대 `--force` 푸시 금지 (히스토리 보존)

@@ -13,11 +13,12 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.DEV_HOST }}
-          username: ${{ secrets.DEV_USER }}
-          key: ${{ secrets.DEV_SSH_KEY }}
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEV_APP_PATH }}
+            cd ${{ secrets.DEV_SERVER_PATH }}
             git pull origin main
             docker compose build --no-cache
             docker compose up -d

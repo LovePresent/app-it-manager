@@ -69,10 +69,11 @@ cd backend && python seed_categories.py
 ```
 
 ## GitHub Actions Secrets 필요
-- `DEV_HOST`: 개발서버 IP
-- `DEV_USER`: SSH 유저
-- `DEV_SSH_KEY`: SSH 프라이빗 키
-- `DEV_APP_PATH`: 서버 내 앱 경로
+- `DEV_SERVER_HOST`: 개발서버 IP
+- `DEV_SERVER_PORT`: SSH 포트
+- `DEV_SERVER_USER`: SSH 유저
+- `DEV_SERVER_SSH_KEY`: SSH 프라이빗 키
+- `DEV_SERVER_PATH`: 서버 내 앱 경로
 
 ## Agent 가이드 (`docs/*_agent.md`)
 작업 영역별 상세 지침은 아래 문서를 참고:
