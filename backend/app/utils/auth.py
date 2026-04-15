@@ -66,15 +66,20 @@ def get_or_create_user(db: Session, token_payload: dict) -> User:
         user.authentik_id = sub
         if name:
             user.name = name
+        from app.config import settings
+        if email in settings.ADMIN_EMAILS:
+            user.role = "admin"
         db.commit()
         db.refresh(user)
         return user
 
+    from app.config import settings
+    role = "admin" if email in settings.ADMIN_EMAILS else "user"
     user = User(
         authentik_id=sub,
         email=email or f"{sub}@authentik",
         name=name or "Unknown",
-        role="user",
+        role=role,
     )
     db.add(user)
     db.commit()

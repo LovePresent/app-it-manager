@@ -39,7 +39,7 @@ async def callback(code: str, request: Request):
     tokens = resp.json()
 
     # Redirect to frontend with token
-    frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:5173"
+    frontend_url = settings.FRONTEND_URL
     access_token = tokens.get("access_token", "")
     return RedirectResponse(f"{frontend_url}/auth/callback?token={access_token}")
 

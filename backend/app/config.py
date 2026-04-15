@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     # App
     SECRET_KEY: str = "change-me-in-production"
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:80"]
+    FRONTEND_URL: str = "http://localhost:9918"
     QR_BASE_URL: str = "http://localhost:80"
     ASSET_TAG_PREFIX: str = "IT"
+    ADMIN_EMAILS: list[str] = []
 
     @property
     def oidc_discovery_url(self) -> str:
