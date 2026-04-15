@@ -18,8 +18,36 @@ jobs:
           username: ${{ secrets.DEV_SERVER_USER }}
           key: ${{ secrets.DEV_SERVER_SSH_KEY }}
           script: |
-            cd ${{ secrets.DEV_SERVER_PATH }}
+            set -e
+
+            APP_DIR="$HOME/app-it-manager"
+            echo "=== [1] 앱 디렉토리: $APP_DIR ==="
+            cd "$APP_DIR"
+
+            echo "=== [2] git pull ==="
             git pull origin main
+
+            echo "=== [3] docker compose build ==="
             docker compose build --no-cache
+
+            echo "=== [4] docker compose up ==="
             docker compose up -d
+
+            echo "=== [5] 불필요한 이미지 정리 ==="
             docker system prune -f
+
+            echo "=== [6] 컨테이너 상태 ==="
+            docker compose ps
+
+            echo "=== [7] backend 로그 (최근 50줄) ==="
+            docker compose logs --tail 50 backend
+
+            echo "=== [8] frontend 로그 (최근 30줄) ==="
+            docker compose logs --tail 30 frontend
+
+            echo "=== [9] 헬스체크 ==="
+            sleep 5
+            curl -sf http://localhost:8818/api/health && echo "✅ Backend 정상" || echo "❌ Backend 응답 없음"
+            curl -sf http://localhost:9918 && echo "✅ Frontend 정상" || echo "❌ Frontend 응답 없음"
+
+            echo "=== ✅ 배포 완료 ==="
