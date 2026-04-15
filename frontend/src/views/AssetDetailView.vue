@@ -84,7 +84,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -98,7 +98,6 @@ import api from '@/api'
 import type { Asset, AssignmentRecord } from '@/types'
 
 const route = useRoute()
-const router = useRouter()
 const toast = useToast()
 const id = Number(route.params.id)
 
