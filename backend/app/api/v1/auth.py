@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
+from urllib.parse import urlencode
 import httpx
 
 from app.config import settings
@@ -18,7 +19,7 @@ def login():
         "redirect_uri": settings.AUTHENTIK_REDIRECT_URI,
         "scope": "openid profile email",
     }
-    url = f"{authorize_url}?" + "&".join(f"{k}={v}" for k, v in params.items())
+    url = f"{authorize_url}?{urlencode(params)}"
     return RedirectResponse(url)
 
 
