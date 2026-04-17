@@ -12,11 +12,16 @@ jobs:
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          CI_AUTHENTIK_CLIENT_ID: ${{ secrets.AUTHENTIK_CLIENT_ID }}
+          CI_AUTHENTIK_CLIENT_SECRET: ${{ secrets.AUTHENTIK_CLIENT_SECRET }}
+          CI_SECRET_KEY: ${{ secrets.SECRET_KEY }}
         with:
           host: ${{ secrets.DEV_SERVER_HOST }}
           port: ${{ secrets.DEV_SERVER_PORT }}
           username: ${{ secrets.DEV_SERVER_USER }}
           key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          envs: CI_AUTHENTIK_CLIENT_ID,CI_AUTHENTIK_CLIENT_SECRET,CI_SECRET_KEY
           script: |
             set -e
 
@@ -34,23 +39,23 @@ jobs:
             git pull origin main
 
             echo "=== [3] .env 파일 생성 (GitHub Secrets) ==="
-            cat > "$APP_DIR/.env" << 'ENVEOF'
-DATABASE_URL=sqlite:///./data/itam.db
-AUTHENTIK_BASE_URL=https://auth.cqv.kr
-AUTHENTIK_CLIENT_ID=${{ secrets.AUTHENTIK_CLIENT_ID }}
-AUTHENTIK_CLIENT_SECRET=${{ secrets.AUTHENTIK_CLIENT_SECRET }}
-AUTHENTIK_REDIRECT_URI=https://dev.cqv.kr/manage/it/api/v1/auth/callback
-AUTHENTIK_JWKS_URL=https://auth.cqv.kr/application/o/itam/jwks/
-AUTHENTIK_TOKEN_URL=https://auth.cqv.kr/application/o/token/
-AUTHENTIK_AUTHORIZE_URL=https://auth.cqv.kr/application/o/authorize/
-AUTHENTIK_USERINFO_URL=https://auth.cqv.kr/application/o/userinfo/
-SECRET_KEY=${{ secrets.SECRET_KEY }}
-CORS_ORIGINS=["https://dev.cqv.kr"]
-FRONTEND_URL=https://dev.cqv.kr/manage/it
-QR_BASE_URL=https://dev.cqv.kr/manage/it
-ASSET_TAG_PREFIX=IT
-ADMIN_EMAILS=["it.j@cqv.kr"]
-ENVEOF
+            {
+              echo "DATABASE_URL=sqlite:///./data/itam.db"
+              echo "AUTHENTIK_BASE_URL=https://auth.cqv.kr"
+              printf 'AUTHENTIK_CLIENT_ID=%s\n' "$CI_AUTHENTIK_CLIENT_ID"
+              printf 'AUTHENTIK_CLIENT_SECRET=%s\n' "$CI_AUTHENTIK_CLIENT_SECRET"
+              echo "AUTHENTIK_REDIRECT_URI=https://dev.cqv.kr/manage/it/api/v1/auth/callback"
+              echo "AUTHENTIK_JWKS_URL=https://auth.cqv.kr/application/o/itam/jwks/"
+              echo "AUTHENTIK_TOKEN_URL=https://auth.cqv.kr/application/o/token/"
+              echo "AUTHENTIK_AUTHORIZE_URL=https://auth.cqv.kr/application/o/authorize/"
+              echo "AUTHENTIK_USERINFO_URL=https://auth.cqv.kr/application/o/userinfo/"
+              printf 'SECRET_KEY=%s\n' "$CI_SECRET_KEY"
+              echo 'CORS_ORIGINS=["https://dev.cqv.kr"]'
+              echo "FRONTEND_URL=https://dev.cqv.kr/manage/it"
+              echo "QR_BASE_URL=https://dev.cqv.kr/manage/it"
+              echo "ASSET_TAG_PREFIX=IT"
+              echo 'ADMIN_EMAILS=["it.j@cqv.kr"]'
+            } > "$APP_DIR/.env"
 
             echo "=== [4] docker compose build ==="
             docker compose build --no-cache
@@ -58,19 +63,19 @@ ENVEOF
             echo "=== [5] docker compose up ==="
             docker compose up -d
 
-            echo "=== [5] 불필요한 이미지 정리 ==="
+            echo "=== [6] 불필요한 이미지 정리 ==="
             docker system prune -f
 
-            echo "=== [6] 컨테이너 상태 ==="
+            echo "=== [7] 컨테이너 상태 ==="
             docker compose ps
 
-            echo "=== [7] backend 로그 (최근 50줄) ==="
+            echo "=== [8] backend 로그 (최근 50줄) ==="
             docker compose logs --tail 50 backend
 
-            echo "=== [8] frontend 로그 (최근 30줄) ==="
+            echo "=== [9] frontend 로그 (최근 30줄) ==="
             docker compose logs --tail 30 frontend
 
-            echo "=== [9] 헬스체크 ==="
+            echo "=== [10] 헬스체크 ==="
             sleep 5
             curl -sf http://localhost:8818/api/health && echo "✅ Backend 정상" || echo "❌ Backend 응답 없음"
             curl -sf http://localhost:9918 && echo "✅ Frontend 정상" || echo "❌ Frontend 응답 없음"
