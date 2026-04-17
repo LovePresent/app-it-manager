@@ -33,16 +33,29 @@ jobs:
             echo "=== [2] git pull ==="
             git pull origin main
 
-            echo "=== [3] docker compose build ==="
+            echo "=== [3] .env 파일 생성 (GitHub Secrets) ==="
+            cat > "$APP_DIR/.env" << 'ENVEOF'
+DATABASE_URL=sqlite:///./data/itam.db
+AUTHENTIK_BASE_URL=https://auth.cqv.kr
+AUTHENTIK_CLIENT_ID=${{ secrets.AUTHENTIK_CLIENT_ID }}
+AUTHENTIK_CLIENT_SECRET=${{ secrets.AUTHENTIK_CLIENT_SECRET }}
+AUTHENTIK_REDIRECT_URI=https://dev.cqv.kr/manage/it/api/v1/auth/callback
+AUTHENTIK_JWKS_URL=https://auth.cqv.kr/application/o/itam/jwks/
+AUTHENTIK_TOKEN_URL=https://auth.cqv.kr/application/o/token/
+AUTHENTIK_AUTHORIZE_URL=https://auth.cqv.kr/application/o/authorize/
+AUTHENTIK_USERINFO_URL=https://auth.cqv.kr/application/o/userinfo/
+SECRET_KEY=${{ secrets.SECRET_KEY }}
+CORS_ORIGINS=["https://dev.cqv.kr"]
+FRONTEND_URL=https://dev.cqv.kr/manage/it
+QR_BASE_URL=https://dev.cqv.kr/manage/it
+ASSET_TAG_PREFIX=IT
+ADMIN_EMAILS=["it.j@cqv.kr"]
+ENVEOF
+
+            echo "=== [4] docker compose build ==="
             docker compose build --no-cache
 
-            echo "=== [3.5] .env 파일 확인 ==="
-            if [ ! -f "$APP_DIR/.env" ]; then
-              echo ".env 없음 → .env.example 복사 (초기 실행용)"
-              cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-            fi
-
-            echo "=== [4] docker compose up ==="
+            echo "=== [5] docker compose up ==="
             docker compose up -d
 
             echo "=== [5] 불필요한 이미지 정리 ==="
