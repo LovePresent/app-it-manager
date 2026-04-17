@@ -12,7 +12,7 @@
 import Button from 'primevue/button'
 
 function login() {
-  window.location.href = '/api/v1/auth/login'
+  window.location.href = import.meta.env.BASE_URL + 'api/v1/auth/login'
 }
 </script>
 
