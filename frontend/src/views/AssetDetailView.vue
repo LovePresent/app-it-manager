@@ -26,11 +26,11 @@
       <div class="card info-card">
         <h3>구매/보증</h3>
         <div class="info-row"><span>취득일</span><span>{{ asset.purchase_date ?? '-' }}</span></div>
-        <div class="info-row"><span>취득가</span><span>{{ asset.purchase_cost ? `₩${asset.purchase_cost.toLocaleString()}` : '-' }}</span></div>
+        <div class="info-row"><span>취득가</span><span>{{ asset.purchase_price ? `₩${asset.purchase_price.toLocaleString()}` : '-' }}</span></div>
         <div class="info-row"><span>보증 만료</span><span>{{ asset.warranty_expiry ?? '-' }}</span></div>
         <div class="info-row"><span>위치</span><span>{{ asset.location_name ?? '-' }}</span></div>
         <div class="info-row"><span>부서</span><span>{{ asset.department_name ?? '-' }}</span></div>
-        <div class="info-row"><span>사용자</span><span>{{ asset.assigned_to_name ?? '-' }}</span></div>
+        <div class="info-row"><span>사용자</span><span>{{ asset.assigned_user_name ?? '-' }}</span></div>
       </div>
     </div>
 
@@ -43,9 +43,9 @@
       <h3>배정 이력</h3>
       <DataTable :value="assignments" stripedRows size="small" style="margin-top:0.75rem">
         <Column field="user_name" header="사용자" />
-        <Column field="assigned_date" header="배정일" />
-        <Column field="returned_date" header="반납일">
-          <template #body="{ data }">{{ data.returned_date ?? '사용 중' }}</template>
+        <Column field="assigned_at" header="배정일" />
+        <Column field="returned_at" header="반납일">
+          <template #body="{ data }">{{ data.returned_at ?? '사용 중' }}</template>
         </Column>
         <Column field="notes" header="비고" />
       </DataTable>
@@ -70,7 +70,7 @@
         <div class="field"><label>시리얼 번호</label><InputText v-model="editForm.serial_number" fluid /></div>
         <div class="field"><label>모델</label><InputText v-model="editForm.model" fluid /></div>
         <div class="field"><label>제조사</label><InputText v-model="editForm.manufacturer" fluid /></div>
-        <div class="field"><label>취득가</label><InputNumber v-model="editForm.purchase_cost" mode="currency" currency="KRW" locale="ko-KR" fluid /></div>
+        <div class="field"><label>취득가</label><InputNumber v-model="editForm.purchase_price" mode="currency" currency="KRW" locale="ko-KR" fluid /></div>
         <div class="field"><label>보증 만료</label><InputText v-model="editForm.warranty_expiry" type="date" fluid /></div>
         <div class="field full"><label>비고</label><Textarea v-model="editForm.notes" rows="2" fluid /></div>
       </div>
@@ -134,7 +134,7 @@ async function assignAsset() {
 }
 
 async function returnAsset() {
-  await api.post(`/assets/${id}/return`)
+  await api.post(`/assets/${id}/return`, { notes: null })
   toast.add({ severity: 'success', summary: '반납 완료', life: 3000 })
   loadAsset()
   loadAssignments()

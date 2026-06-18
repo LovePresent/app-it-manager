@@ -10,7 +10,7 @@ if config.config_file_name is not None:
 from app.database import Base
 from app.models import user, category, common, asset, license, subscription
 from app.models import ip_address, certificate, consumable, maintenance
-from app.models import rack, network, audit_log, notification
+from app.models import rack, network, audit_log, notification, device_inventory, ai_subscription
 
 target_metadata = Base.metadata
 

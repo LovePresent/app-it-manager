@@ -17,6 +17,7 @@ class CategoryCreate(CategoryBase):
 
 class CategoryUpdate(BaseModel):
     name: str | None = None
+    slug: str | None = None
     icon: str | None = None
     description: str | None = None
     custom_field_schema: list | None = None

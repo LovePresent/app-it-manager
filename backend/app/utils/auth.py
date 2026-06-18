@@ -30,6 +30,32 @@ async def get_jwks() -> dict:
 
 
 async def verify_token(token: str) -> dict:
+    if settings.LOCAL_LOGIN_ENABLED:
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except JWTError:
+            unverified_header = {}
+
+        if unverified_header.get("alg") == "HS256":
+            try:
+                payload = jwt.decode(
+                    token,
+                    settings.SECRET_KEY,
+                    algorithms=["HS256"],
+                    issuer=settings.LOCAL_LOGIN_TOKEN_ISSUER,
+                    options={"verify_aud": False},
+                )
+            except JWTError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Local token validation failed: {e}",
+                )
+
+            if payload.get("local") is True and str(payload.get("sub", "")).startswith("local:"):
+                return payload
+
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid local token")
+
     try:
         jwks = await get_jwks()
         unverified_header = jwt.get_unverified_header(token)

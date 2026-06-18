@@ -51,14 +51,24 @@ frontend/
 
 ## 커맨드
 ```bash
+# 원칙: 로컬 Windows에서 npm/npm.cmd를 직접 실행하지 않는다.
+# frontend/node_modules 등 로컬 npm 산출물이 생기면 정리하고,
+# 실행/빌드/검증/배포는 WSL Ubuntu Docker + compose.local.yaml을 사용한다.
+
 # 개발 실행
-docker compose up --build
+# 로컬 기본은 WSL Ubuntu Docker + compose.local.yaml
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/d/CQV-Platform/app/app-it-manager && docker compose -f compose.local.yaml up -d --build"
+
+# 로컬 상태/로그 확인
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/d/CQV-Platform/app/app-it-manager && docker compose -f compose.local.yaml ps"
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/d/CQV-Platform/app/app-it-manager && docker compose -f compose.local.yaml logs backend --tail 80"
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/d/CQV-Platform/app/app-it-manager && docker compose -f compose.local.yaml logs frontend --tail 80"
 
 # 백엔드만 실행 (개발)
 cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload
 
-# 프론트엔드만 실행 (개발)
-cd frontend && npm install && npm run dev
+# 프론트엔드만 단독 실행이 필요해도 로컬 npm 대신 Docker compose frontend 서비스를 사용한다.
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/d/CQV-Platform/app/app-it-manager && docker compose -f compose.local.yaml up -d --build frontend"
 
 # DB 마이그레이션
 cd backend && alembic revision --autogenerate -m "description"
@@ -77,7 +87,7 @@ cd backend && python seed_categories.py
 
 ## Agent 가이드 (`docs/*_agent.md`)
 작업 영역별 상세 지침은 아래 문서를 참고:
-- [`docs/deploy_agent.md`](docs/deploy_agent.md) — 배포 플로우, Actions/Docker 상태 확인, 오류 대응
+- [`docs/deploy_agent.md`](docs/deploy_agent.md) — 배포 플로우, WSL Ubuntu Docker 기본값, Actions/Docker 상태 확인, 오류 대응
 - [`docs/backend_agent.md`](docs/backend_agent.md) — 백엔드 구조, API 컨벤션, 마이그레이션
 - [`docs/frontend_agent.md`](docs/frontend_agent.md) — 프론트엔드 구조, PrimeVue, Pinia
 - [`docs/db_agent.md`](docs/db_agent.md) — DB 스키마, 마이그레이션, 시드 데이터

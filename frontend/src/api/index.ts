@@ -1,9 +1,11 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: import.meta.env.BASE_URL + 'api/v1',
+  baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
 })
+
+const loginPath = `${import.meta.env.BASE_URL}login`
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
@@ -18,7 +20,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('access_token')
-      window.location.href = '/login'
+      window.location.href = loginPath
     }
     return Promise.reject(err)
   },

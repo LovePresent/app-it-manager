@@ -27,7 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('access_token')
     user.value = null
     isAuthenticated.value = false
-    window.location.href = '/login'
+    window.location.href = `${import.meta.env.BASE_URL}login`
   }
 
   return { user, isAuthenticated, fetchUser, setToken, logout }

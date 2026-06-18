@@ -57,6 +57,18 @@ def update_consumable(cs_id: int, data: ConsumableStockUpdate, db: Session = Dep
     return _to_response(cs)
 
 
+@router.delete("/consumables/{cs_id}")
+def delete_consumable(cs_id: int, db: Session = Depends(get_db)):
+    cs = db.query(ConsumableStock).filter(ConsumableStock.id == cs_id).first()
+    if not cs:
+        raise HTTPException(status_code=404, detail="Consumable not found")
+    log_action(db, "consumable", cs.id, "delete")
+    db.query(ConsumableTransaction).filter(ConsumableTransaction.consumable_id == cs_id).delete()
+    db.delete(cs)
+    db.commit()
+    return {"message": "Consumable deleted"}
+
+
 @router.post("/consumables/{cs_id}/transactions", response_model=ConsumableTransactionResponse, status_code=201)
 def add_transaction(cs_id: int, data: ConsumableTransactionCreate, db: Session = Depends(get_db)):
     cs = db.query(ConsumableStock).filter(ConsumableStock.id == cs_id).first()

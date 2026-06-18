@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     AUTHENTIK_AUTHORIZE_URL: str = ""
     AUTHENTIK_USERINFO_URL: str = ""
 
+    # Local-only login for docker compose development.
+    # Keep disabled in shared/dev/prod deployments.
+    LOCAL_LOGIN_ENABLED: bool = False
+    LOCAL_LOGIN_EMAIL: str = "it.j@cqv.kr"
+    LOCAL_LOGIN_NAME: str = "IT Local Admin"
+    LOCAL_LOGIN_DEPARTMENT: str = "IT"
+    LOCAL_LOGIN_ROLE: str = "admin"
+    LOCAL_LOGIN_TOKEN_ISSUER: str = "app-it-manager-local"
+    LOCAL_LOGIN_TOKEN_HOURS: int = 12
+
     # App
     SECRET_KEY: str = "change-me-in-production"
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:80"]

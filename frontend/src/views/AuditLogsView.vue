@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-header"><h1>감사 로그</h1></div>
+    <div class="page-header"><h1>사용로그</h1></div>
     <div class="filters-row">
       <Select v-model="filterEntity" :options="entityTypes" placeholder="엔티티 유형" showClear @change="load" />
       <Select v-model="filterAction" :options="['create','update','delete','assign','return']" placeholder="액션" showClear @change="load" />
