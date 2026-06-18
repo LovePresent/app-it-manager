@@ -4,7 +4,7 @@
       <h1>자산 목록</h1>
       <div style="display:flex;gap:0.5rem">
         <Button label="엑셀 내보내기" icon="pi pi-download" severity="secondary" @click="exportExcel" />
-        <Button label="자산 추가" icon="pi pi-plus" @click="showCreate = true" />
+        <Button label="자산 추가" icon="pi pi-plus" @click="openCreate" />
       </div>
     </div>
 
@@ -27,10 +27,23 @@
             <Tag :severity="statusSeverity(data.status)" :value="statusLabel(data.status)" />
           </template>
         </Column>
-        <Column field="assigned_to_name" header="사용자" />
-        <Column field="location_name" header="위치" />
-        <Column field="purchase_cost" header="취득가">
-          <template #body="{ data }">{{ data.purchase_cost ? `₩${data.purchase_cost.toLocaleString()}` : '-' }}</template>
+        <Column header="사용자">
+          <template #body="{ data }">
+            <div class="stack-cell">
+              <strong>{{ data.assigned_user_name || '-' }}</strong>
+            </div>
+          </template>
+        </Column>
+        <Column header="부서 / 위치">
+          <template #body="{ data }">
+            <div class="stack-cell">
+              <strong>{{ data.department_name || '부서 미등록' }}</strong>
+              <small>{{ data.location_name || '위치 미등록' }}</small>
+            </div>
+          </template>
+        </Column>
+        <Column field="purchase_price" header="취득가">
+          <template #body="{ data }">{{ data.purchase_price ? `₩${data.purchase_price.toLocaleString()}` : '-' }}</template>
         </Column>
       </DataTable>
       <Paginator :rows="size" :totalRecords="total" :first="(page - 1) * size" @page="onPage" />
@@ -44,7 +57,7 @@
         <div class="field"><label>모델</label><InputText v-model="form.model" fluid /></div>
         <div class="field"><label>제조사</label><InputText v-model="form.manufacturer" fluid /></div>
         <div class="field"><label>취득일</label><InputText v-model="form.purchase_date" type="date" fluid /></div>
-        <div class="field"><label>취득가</label><InputNumber v-model="form.purchase_cost" mode="currency" currency="KRW" locale="ko-KR" fluid /></div>
+        <div class="field"><label>취득가</label><InputNumber v-model="form.purchase_price" mode="currency" currency="KRW" locale="ko-KR" fluid /></div>
         <div class="field"><label>보증 만료</label><InputText v-model="form.warranty_expiry" type="date" fluid /></div>
         <div class="field full"><label>비고</label><Textarea v-model="form.notes" rows="2" fluid /></div>
       </div>
@@ -57,8 +70,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Paginator from 'primevue/paginator'
@@ -77,6 +90,7 @@ import { useCategoryStore } from '@/stores/category'
 import type { Asset } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
 const toast = useToast()
 const categoryStore = useCategoryStore()
 
@@ -102,7 +116,7 @@ const statusOptions = [
   { label: '분실', value: 'lost' },
 ]
 
-const form = ref<any>({ name: '', category_id: null, serial_number: '', model: '', manufacturer: '', purchase_date: '', purchase_cost: null, warranty_expiry: '', notes: '' })
+const form = ref<any>(emptyForm())
 
 function statusLabel(s: string) {
   return statusOptions.find((o) => o.value === s)?.label ?? s
@@ -128,9 +142,22 @@ async function loadAssets() {
   }
 }
 
+function routeSearchValue() {
+  return typeof route.query.search === 'string' ? route.query.search : ''
+}
+
 function onPage(e: any) {
   page.value = e.page + 1
   loadAssets()
+}
+
+function emptyForm() {
+  return { name: '', category_id: null, serial_number: '', model: '', manufacturer: '', purchase_date: '', purchase_price: null, warranty_expiry: '', notes: '' }
+}
+
+function openCreate() {
+  form.value = emptyForm()
+  showCreate.value = true
 }
 
 function goDetail(e: any) {
@@ -143,7 +170,7 @@ async function createAsset() {
     await api.post('/assets', form.value)
     toast.add({ severity: 'success', summary: '성공', detail: '자산이 추가되었습니다.', life: 3000 })
     showCreate.value = false
-    form.value = { name: '', category_id: null, serial_number: '', model: '', manufacturer: '', purchase_date: '', purchase_cost: null, warranty_expiry: '', notes: '' }
+    form.value = emptyForm()
     loadAssets()
   } catch (err: any) {
     toast.add({ severity: 'error', summary: '오류', detail: err.response?.data?.detail ?? '저장 실패', life: 5000 })
@@ -162,7 +189,20 @@ async function exportExcel() {
   URL.revokeObjectURL(url)
 }
 
+watch(
+  () => route.query.search,
+  () => {
+    const nextSearch = routeSearchValue()
+    if (nextSearch !== search.value) {
+      search.value = nextSearch
+      page.value = 1
+      loadAssets()
+    }
+  },
+)
+
 onMounted(() => {
+  search.value = routeSearchValue()
   categoryStore.fetchCategories()
   loadAssets()
 })

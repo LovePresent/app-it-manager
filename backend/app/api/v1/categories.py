@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -25,7 +26,11 @@ def get_category(cat_id: int, db: Session = Depends(get_db)):
 def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     cat = AssetCategory(**data.model_dump())
     db.add(cat)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Category already exists")
     db.refresh(cat)
     return cat
 
@@ -37,7 +42,11 @@ def update_category(cat_id: int, data: CategoryUpdate, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Category not found")
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(cat, key, val)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Category already exists")
     db.refresh(cat)
     return cat
 

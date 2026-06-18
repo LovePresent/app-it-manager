@@ -65,7 +65,10 @@ async def me(request: Request):
             "id": user.id,
             "email": user.email,
             "name": user.name,
+            "display_name": user.name,
             "role": user.role,
+            "is_admin": user.role == "admin",
+            "is_active": user.is_active,
             "department": user.department,
             "avatar_url": user.avatar_url,
         }

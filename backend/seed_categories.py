@@ -9,7 +9,7 @@ from app.models.category import AssetCategory
 # Import all models to register them
 from app.models import user, common, asset, license, subscription
 from app.models import ip_address, certificate, consumable, maintenance
-from app.models import rack, network, audit_log, notification
+from app.models import rack, network, audit_log, notification, device_inventory, ai_subscription
 
 CATEGORIES = [
     {"name": "PC/서버", "slug": "pc-server", "icon": "pi pi-server", "sort_order": 1},
