@@ -67,6 +67,7 @@ from app.api.v1 import (
     vendors,
     audit_logs,
     users,
+    system,
 )
 
 api_prefix = settings.API_V1_PREFIX
@@ -94,6 +95,7 @@ app.include_router(import_export.router, prefix=api_prefix, tags=["Import/Export
 app.include_router(qr.router, prefix=api_prefix, tags=["QR Codes"])
 app.include_router(audit_logs.router, prefix=api_prefix, tags=["Audit Logs"])
 app.include_router(users.router, prefix=api_prefix, tags=["Users"])
+app.include_router(system.router, prefix=api_prefix, tags=["System"])
 
 
 @app.get("/api/health")

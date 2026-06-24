@@ -36,6 +36,7 @@ const router = createRouter({
         { path: 'maintenance', name: 'Maintenance', component: () => import('@/views/MaintenanceView.vue') },
         { path: 'racks', name: 'Racks', component: () => import('@/views/RacksView.vue') },
         { path: 'notifications', name: 'Notifications', component: () => import('@/views/NotificationsView.vue') },
+        { path: 'settings', name: 'SystemSettings', component: () => import('@/views/SystemSettingsView.vue') },
         { path: 'audit-logs', name: 'AuditLogs', component: () => import('@/views/AuditLogsView.vue') },
         { path: 'categories', name: 'Categories', component: () => import('@/views/CategoriesView.vue') },
         { path: 'locations', name: 'Locations', component: () => import('@/views/LocationsView.vue') },

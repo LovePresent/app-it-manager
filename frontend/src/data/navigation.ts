@@ -201,6 +201,17 @@ export const navigationItems: NavigationItem[] = [
     aiContext: 'operation.notification',
   },
   {
+    key: 'settings',
+    label: '시스템 설정',
+    to: '/settings',
+    icon: 'pi pi-cog',
+    section: '관리',
+    description: 'DB 백업과 복원',
+    keywords: ['설정', '시스템', 'db', 'database', '백업', '복원', 'backup', 'restore'],
+    entity: 'system_setting',
+    aiContext: 'admin.system.database',
+  },
+  {
     key: 'audit-logs',
     label: '사용로그',
     to: '/audit-logs',
@@ -246,7 +257,7 @@ export const topNavigationGroups: NavigationGroup[] = [
   { key: 'security', label: '보안', icon: 'pi pi-shield', items: items(['computer-settings', 'device-licenses', 'certificates']) },
   { key: 'contracts', label: '계약', icon: 'pi pi-briefcase', items: items(['licenses', 'subscriptions', 'ai-subscriptions']) },
   { key: 'operations', label: '운영', icon: 'pi pi-chart-line', items: items(['consumables', 'notifications']) },
-  { key: 'admin', label: '관리', icon: 'pi pi-cog', items: items(['categories', 'locations', 'audit-logs']) },
+  { key: 'admin', label: '관리', icon: 'pi pi-cog', items: items(['settings', 'categories', 'locations', 'audit-logs']) },
 ]
 
 export const sidebarSections: SidebarSection[] = [
@@ -255,7 +266,7 @@ export const sidebarSections: SidebarSection[] = [
   { key: 'security', label: '보안', items: items(['computer-settings', 'device-licenses', 'certificates']) },
   { key: 'contracts', label: '계약', items: items(['licenses', 'subscriptions', 'ai-subscriptions']) },
   { key: 'operations', label: '운영', items: items(['consumables', 'notifications']) },
-  { key: 'admin', label: '관리', items: items(['categories', 'locations', 'audit-logs']) },
+  { key: 'admin', label: '관리', items: items(['settings', 'categories', 'locations', 'audit-logs']) },
 ]
 
 export const featuredSearchItems = items(['devices', 'purchased-devices', 'distributed-devices', 'computer-settings', 'device-licenses', 'ip-addresses'])
