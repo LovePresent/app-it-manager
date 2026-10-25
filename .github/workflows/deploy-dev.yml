@@ -33,6 +33,10 @@ jobs:
             APP_DIR="$HOME/app-it-manager"
             cd "$APP_DIR"
             test -f .env
+            if [ -e .agent-deployment-active ]; then
+              echo 'An earlier deployment requires recovery. Preserving its rollback images and database.'
+              exit 1
+            fi
             BACKEND_CONTAINER="$(docker compose ps -q backend)"
             test -n "$BACKEND_CONTAINER"
             OLD_BACKEND_IMAGE="$(docker inspect --format '{{.Image}}' "$BACKEND_CONTAINER")"
