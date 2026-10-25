@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import case, func, or_
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -524,6 +524,10 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="디바이스를 찾을 수 없습니다.")
     if db.query(DeviceAgent.id).filter(DeviceAgent.device_id == device_id).first() is not None:
         raise HTTPException(status_code=409, detail="에이전트 관리 이력이 있는 장비는 삭제할 수 없습니다. 사용 종료 시 퇴역 상태로 변경해 주세요.")
+    has_license = db.execute(text("SELECT 1 FROM license_assignments WHERE device_id=:id LIMIT 1"), {"id": device_id}).first()
+    has_purchase = db.execute(text("SELECT 1 FROM purchase_allocations WHERE resource_type='device' AND resource_id=:id LIMIT 1"), {"id": device_id}).first()
+    if has_license or has_purchase:
+        raise HTTPException(status_code=409, detail="라이선스 또는 구매 연결이 있는 장비는 삭제할 수 없습니다. 연결을 먼저 해제하거나 사용 종료 시 퇴역 상태로 변경해 주세요.")
     deleted_serial = device.serial_number
     db.delete(device)
     db.flush()

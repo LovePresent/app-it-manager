@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -5,7 +6,7 @@ from app.database import get_db
 from app.models.common import Vendor
 from app.schemas.location import VendorCreate, VendorUpdate, VendorResponse
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 @router.get("/vendors", response_model=list[VendorResponse])
 def list_vendors(db: Session = Depends(get_db)):

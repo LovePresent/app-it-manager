@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -6,7 +7,7 @@ from app.database import get_db
 from app.models.asset import Asset
 from app.services.qr_service import generate_qr_code, generate_qr_bytes
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/qr/{asset_id}")

@@ -3,6 +3,7 @@ Production migrations and smoke checks are performed separately on the preserved
 application database; these fixtures never replace that database.
 """
 import hashlib
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -14,6 +15,9 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
+from sqlalchemy import inspect
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
@@ -42,6 +46,18 @@ class AgentApiFixture:
         def enable_foreign_keys(connection, record):
             connection.execute("PRAGMA foreign_keys=ON")
         Base.metadata.create_all(self.engine)
+        # The release intentionally keeps unrelated ORM models out of main.py,
+        # while its unchanged prerequisite migrations own these ledger tables.
+        # Use those actual migrations in isolated fixtures for deletion guards.
+        with self.engine.begin() as connection:
+            with Operations.context(MigrationContext.configure(connection)):
+                for filename, table in (("20260728_add_license_assignments.py", "license_assignments"),
+                                        ("20260805_add_purchase_ledger.py", "purchase_allocations")):
+                    if not inspect(connection).has_table(table):
+                        spec = importlib.util.spec_from_file_location("fixture_" + table, Path(__file__).parents[1] / "alembic" / "versions" / filename)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        module.upgrade()
         self.sessions = sessionmaker(bind=self.engine, autoflush=False)
         self.db = self.sessions()
         self.actor = User(email="agent-admin@example.test", name="Agent test admin", role="admin", is_active=True)

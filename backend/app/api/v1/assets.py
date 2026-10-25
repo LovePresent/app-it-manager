@@ -14,7 +14,7 @@ from app.services.asset_service import generate_asset_tag
 from app.services.audit_service import log_action, compute_changes
 from app.services.qr_service import generate_qr_code
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _to_response(asset: Asset) -> AssetResponse:

@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -9,7 +10,7 @@ from app.models.common import Department
 from app.models.device_inventory import Device
 from app.schemas.location import DepartmentCreate, DepartmentUpdate, DepartmentResponse
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _clean_text(value: str | None) -> str | None:

@@ -61,7 +61,9 @@
     </Dialog>
 
     <Dialog v-model:visible="showQR" header="QR 코드" :modal="true" style="width:320px;text-align:center">
-      <img :src="`/api/v1/qr/${asset.id}`" alt="QR Code" style="max-width:250px" />
+      <p v-if="qrLoading" role="status">QR 코드를 불러오는 중입니다.</p>
+      <div v-else-if="qrError" role="alert"><p>{{ qrError }}</p><Button label="다시 불러오기" icon="pi pi-refresh" text @click="loadQR" /></div>
+      <img v-else-if="qrUrl" :src="qrUrl" alt="자산 QR 코드" style="max-width:250px" />
     </Dialog>
 
     <Dialog v-model:visible="showEdit" header="자산 수정" :modal="true" style="width:600px">
@@ -83,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -105,6 +107,12 @@ const asset = ref<Asset | null>(null)
 const assignments = ref<AssignmentRecord[]>([])
 const showAssign = ref(false)
 const showQR = ref(false)
+const qrUrl = ref('')
+const qrLoading = ref(false)
+const qrError = ref('')
+let qrRequest = 0
+let qrController: AbortController | null = null
+let qrDisposed = false
 const showEdit = ref(false)
 const assignUserId = ref<number | null>(null)
 const assignNotes = ref('')
@@ -114,6 +122,38 @@ const statusMap: Record<string, string> = { in_stock: '재고', assigned: '사�
 const severityMap: Record<string, any> = { in_stock: 'warn', assigned: 'success', in_maintenance: 'info', retired: 'secondary', disposed: 'contrast', lost: 'danger' }
 function statusLabel(s: string) { return statusMap[s] ?? s }
 function statusSeverity(s: string) { return severityMap[s] ?? 'secondary' }
+
+function clearQR() {
+  ++qrRequest
+  qrController?.abort()
+  qrController = null
+  if (qrUrl.value) URL.revokeObjectURL(qrUrl.value)
+  qrUrl.value = ''
+  qrLoading.value = false
+  qrError.value = ''
+}
+
+async function loadQR() {
+  clearQR()
+  const assetId = asset.value?.id
+  if (!showQR.value || !assetId || assetId !== Number(route.params.id) || qrDisposed) return
+  const request = qrRequest
+  qrController = new AbortController()
+  qrLoading.value = true
+  try {
+    const { data } = await api.get<Blob>(`/qr/${assetId}`, { responseType: 'blob', timeout: 15000, signal: qrController.signal })
+    if (qrDisposed || request !== qrRequest || !showQR.value || asset.value?.id !== assetId || Number(route.params.id) !== assetId) return
+    if (!(data instanceof Blob) || !data.size || data.type.split(';')[0] !== 'image/png') throw new Error('Invalid QR image')
+    qrUrl.value = URL.createObjectURL(data)
+  } catch {
+    if (!qrDisposed && request === qrRequest) qrError.value = 'QR 코드를 불러오지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.'
+  } finally {
+    if (request === qrRequest) { qrLoading.value = false; qrController = null }
+  }
+}
+
+watch(() => [showQR.value, asset.value?.id, route.params.id], () => { void loadQR() })
+onBeforeUnmount(() => { qrDisposed = true; clearQR() })
 
 async function loadAsset() {
   const { data } = await api.get(`/assets/${id}`)
