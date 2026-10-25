@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
@@ -16,7 +17,7 @@ from app.models.category import AssetCategory
 from app.schemas.dashboard import DashboardStats, CategoryCount, StatusCount, ExpiringItem
 from app.services.notification_service import check_and_create_notifications
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/dashboard/stats", response_model=DashboardStats)

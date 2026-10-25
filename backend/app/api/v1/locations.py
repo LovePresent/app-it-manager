@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +17,7 @@ from app.schemas.location import (
 )
 
 # ----- Locations -----
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _clean_text(value: str | None) -> str | None:

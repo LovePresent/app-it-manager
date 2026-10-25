@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -7,7 +8,7 @@ from app.models.asset import Asset
 from app.schemas.license import LicenseCreate, LicenseUpdate, LicenseResponse
 from app.services.audit_service import log_action
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _to_response(lic: SoftwareLicense) -> LicenseResponse:

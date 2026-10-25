@@ -1,3 +1,4 @@
+from app.api.deps import get_current_user
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -5,7 +6,7 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.schemas.audit_log import AuditLogResponse
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/audit-logs", response_model=dict)

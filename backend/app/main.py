@@ -70,6 +70,7 @@ from app.api.v1 import (
     users,
     system,
     device_agents,
+    device_ledger_migration,
 )
 
 api_prefix = settings.API_V1_PREFIX
@@ -79,6 +80,7 @@ if settings.LOCAL_LOGIN_ENABLED:
     app.include_router(local_auth.router, prefix=api_prefix, tags=["Local Auth"])
 app.include_router(dashboard.router, prefix=api_prefix, tags=["Dashboard"])
 app.include_router(devices.router, prefix=api_prefix, tags=["Devices"])
+app.include_router(device_ledger_migration.router, prefix=api_prefix, tags=["Device Ledger Migration"])
 app.include_router(device_agents.router, prefix=api_prefix, tags=["Device Agents"])
 app.include_router(assets.router, prefix=api_prefix, tags=["Assets"])
 app.include_router(categories.router, prefix=api_prefix, tags=["Categories"])
