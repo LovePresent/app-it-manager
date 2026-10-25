@@ -1,16 +1,19 @@
 services:
   backend:
     build: ./backend
+    image: ${ITAM_BACKEND_IMAGE:-app-it-manager-backend}
     container_name: itam-backend
     restart: unless-stopped
     env_file: .env
     volumes:
       - backend-data:/app/data
+      - ./backups:/app/backups
     ports:
       - "8818:8818"
 
   frontend:
     build: ./frontend
+    image: ${ITAM_FRONTEND_IMAGE:-app-it-manager-frontend}
     container_name: itam-frontend
     restart: unless-stopped
     ports:
@@ -20,3 +23,5 @@ services:
     
 volumes:
   backend-data:
+    external: true
+    name: ${ITAM_DATABASE_VOLUME:-app-it-manager_backend-data}

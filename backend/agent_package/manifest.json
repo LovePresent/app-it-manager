@@ -1,0 +1,10 @@
+{
+  "version": "0.5.0",
+  "sha256": {
+    "SetupTemplate.exe": "9c5272de9f0d716cacd37b0db1ec2a9a880f42914057a3b56bec3b399dab9c6e",
+    "SecurityPresenceService.exe": "e702fc41c796981624e083ffe099baf9e32211ed7bc3bc810d1ef03d8da4b9e9",
+    "agent.ps1": "ead6c91e8042fd423f164ad9a93b65df309a1bba534db0fe0ab31063f296c25b",
+    "install.template.ps1": "fc7db3388a89093cd875b3c171a3f0702c313264b8536d9399e41810f549a249",
+    "uninstall.ps1": "9a7c0d92920e7d8b60328eed3f63131eee239ec05a4d332cb0da388e663dddd6"
+  }
+}

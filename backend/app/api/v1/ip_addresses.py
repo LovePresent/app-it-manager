@@ -4,12 +4,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.api.deps import get_current_user
+from app.api.v1.inventory_access import require_inventory_editor
 from app.models.asset import Asset
 from app.models.ip_address import IPAddress, IPChangeHistory
 from app.schemas.ip_address import IPAddressCreate, IPAddressUpdate, IPAddressResponse, IPChangeHistoryResponse
 from app.services.audit_service import compute_changes, log_action
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _to_response(ip: IPAddress) -> IPAddressResponse:
@@ -169,7 +171,7 @@ def get_ip(ip_id: int, db: Session = Depends(get_db)):
     return _to_response(ip)
 
 
-@router.post("/ip-addresses", response_model=IPAddressResponse, status_code=201)
+@router.post("/ip-addresses", response_model=IPAddressResponse, status_code=201, dependencies=[Depends(require_inventory_editor)])
 def create_ip(data: IPAddressCreate, db: Session = Depends(get_db)):
     existing = db.query(IPAddress).filter(IPAddress.address == data.address).first()
     if existing:
@@ -184,7 +186,7 @@ def create_ip(data: IPAddressCreate, db: Session = Depends(get_db)):
     return _to_response(ip)
 
 
-@router.put("/ip-addresses/{ip_id}", response_model=IPAddressResponse)
+@router.put("/ip-addresses/{ip_id}", response_model=IPAddressResponse, dependencies=[Depends(require_inventory_editor)])
 def update_ip(ip_id: int, data: IPAddressUpdate, db: Session = Depends(get_db)):
     ip = db.query(IPAddress).filter(IPAddress.id == ip_id).first()
     if not ip:
@@ -213,7 +215,7 @@ def update_ip(ip_id: int, data: IPAddressUpdate, db: Session = Depends(get_db)):
     return _to_response(ip)
 
 
-@router.delete("/ip-addresses/{ip_id}")
+@router.delete("/ip-addresses/{ip_id}", dependencies=[Depends(require_inventory_editor)])
 def delete_ip(ip_id: int, db: Session = Depends(get_db)):
     ip = db.query(IPAddress).filter(IPAddress.id == ip_id).first()
     if not ip:

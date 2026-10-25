@@ -1,0 +1,2 @@
+# Package digests cover exact bytes; do not convert script newlines on checkout.
+backend/agent_package/* -text

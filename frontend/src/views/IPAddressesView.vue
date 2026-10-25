@@ -25,11 +25,38 @@
       <Button label="검색" icon="pi pi-search" @click="load" />
     </div>
 
+    <div class="card agent-observations">
+      <div class="card-title-row"><div><div class="card-title">에이전트가 수집한 네트워크</div><p class="band-rule">기존 IP 대장과 디바이스 입력값을 변경하지 않고 수집 결과를 별도로 표시합니다.</p></div><span class="agent-observation-time">{{ agentsStale ? '서버 연결 끊김 · 마지막 확인' : '5초 자동 확인' }} {{ formatAgentDate(agentsUpdatedAt) }}</span></div>
+      <Message v-if="agentsStale" severity="warn" :closable="false">{{ agentsError }}</Message>
+      <Message v-if="ipAttentionCount" severity="warn" :closable="false">{{ ipAttentionCount }}대에 IP 기준 확인, 불일치 또는 미완료 점검이 있습니다. PC 관리에서 최신 관측과 점검 기록을 확인하세요.</Message>
+      <DataTable :value="observedAgents" size="small" stripedRows scrollable>
+        <Column header="PC" style="min-width:180px"><template #body="{ data }"><div class="stack-cell"><strong>{{ data.hostname || data.serial_number }}</strong><small>{{ data.serial_number }}</small></div></template></Column>
+        <Column header="연결 상태" style="min-width:130px"><template #body="{ data }"><DeviceAgentStatus :agent="data" :loaded="agentsLoaded" :stale="agentsStale" /></template></Column>
+        <Column header="기준 IP 확인" style="min-width:250px">
+          <template #body="{ data }">
+            <div class="ip-monitor-cell">
+              <Tag :value="monitorLabel(data)" :severity="monitorSeverity(data)" />
+              <small>{{ monitorDetail(data) }}</small>
+              <small v-if="data.network_monitor?.expected_ipv4?.length">마지막 비교 기준: {{ data.network_monitor.expected_ipv4.join(', ') }} · {{ monitorSource(data) }}</small>
+              <small v-if="data.network_monitor?.checked_at">확인 시각: {{ formatAgentDate(data.network_monitor.checked_at) }}</small>
+              <Tag v-if="data.network_monitor?.review" :value="reviewLabel(data)" :severity="reviewSeverity(data)" />
+              <small v-if="data.network_monitor?.alert_active && monitorStatus(data) === 'unknown'">이전 불일치는 아직 해소가 확인되지 않았습니다.</small>
+            </div>
+          </template>
+        </Column>
+        <Column header="수집 IPv4" style="min-width:160px"><template #body="{ data }"><div v-for="address in agentIPv4(data)" :key="address"><code>{{ address }}</code></div><span v-if="!agentIPv4(data).length">—</span></template></Column>
+        <Column header="수집 MAC" style="min-width:170px"><template #body="{ data }"><div v-for="mac in agentMacs(data)" :key="mac"><code>{{ mac }}</code></div></template></Column>
+        <Column header="마지막 수집" style="min-width:180px"><template #body="{ data }">{{ formatAgentDate(data.network_updated_at) }}</template></Column>
+        <Column style="min-width:130px"><template #body="{ data }"><Button :label="needsIpReview(data) ? '확인 / 점검' : 'PC 관리'" icon="pi pi-desktop" text size="small" :loading="openingAgentId === data.device_id" @click="openAgentById(data.device_id)" /></template></Column>
+        <template #empty>{{ agentsLoaded ? '검색 조건에 맞는 에이전트가 없습니다.' : '에이전트 네트워크 정보를 불러오는 중입니다.' }}</template>
+      </DataTable>
+    </div>
+
     <div class="card band-card">
       <div class="card-title-row">
         <div>
           <div class="card-title">IP / MAC 네트워크 보기</div>
-          <p class="band-rule">기본은 실제 IP 주소를 부서별로 묶어 표시합니다. VLAN은 하위 보기에서 확인합니다.</p>
+          <p class="band-rule">디바이스 입력값과 IP 주소 대장을 부서별로 묶어 표시합니다. VLAN은 하위 보기에서 확인합니다.</p>
         </div>
         <div class="network-actions">
           <div class="view-toggle" aria-label="IP/MAC 하위 보기">
@@ -272,10 +299,18 @@
     </div>
 
     <div class="card">
-      <div class="card-title">IP / MAC 변경 이력</div>
-      <DataTable :value="historyItems" :loading="historyLoading" stripedRows size="small">
-        <Column header="변경일" style="min-width:150px">
+      <div class="card-title-row">
+        <div><div class="card-title">IP / MAC 변경 이력</div><p class="band-rule">에이전트 관측은 수집 당시의 상태입니다. 변경 시도나 작업자를 확인한 기록은 아닙니다.</p></div>
+        <Select v-model="historySource" :options="historySourceOptions" optionLabel="label" optionValue="value" placeholder="모든 기록 출처" aria-label="IP 변경 이력 출처" showClear @change="changeHistorySource" />
+      </div>
+      <DataTable :value="historyItems" :loading="historyLoading" stripedRows size="small" scrollable class="ip-history-table">
+        <Column header="기록 시각" style="min-width:150px">
           <template #body="{ data }">{{ dateTimeText(data.created_at) }}</template>
+        </Column>
+        <Column header="장비 배정 사용자" style="min-width:145px">
+          <template #body="{ data }">
+            <div class="stack-cell"><span>{{ data.user_name || '미지정' }}</span><small>{{ data.employee_number || '사번 미등록' }}</small><small v-if="data.source_type === 'agent'">변경 작업자 정보가 아닙니다.</small></div>
+          </template>
         </Column>
         <Column header="대상" style="min-width:170px">
           <template #body="{ data }">
@@ -308,7 +343,10 @@
         </Column>
         <Column field="change_reason" header="사유" />
         <Column field="notes" header="비고">
-          <template #body="{ data }">{{ data.notes || '-' }}</template>
+          <template #body="{ data }">
+            <details v-if="data.source_type === 'agent' && data.notes" class="observation-detail"><summary>관측 상세 확인</summary><pre>{{ historyObservationText(data) }}</pre></details>
+            <span v-else>{{ data.notes || '-' }}</span>
+          </template>
         </Column>
       </DataTable>
       <Paginator :rows="historySize" :totalRecords="historyTotal" :first="(historyPage - 1) * historySize" @page="onHistoryPage" />
@@ -343,7 +381,9 @@
         <div><span>시리얼</span><strong>{{ selectedDevice.serial_number }}</strong></div>
         <div><span>OS</span><strong>{{ selectedDevice.os_version || '-' }}</strong></div>
       </div>
+      <template #footer><Button v-if="selectedDevice" label="PC 관리 / 수집 네트워크" icon="pi pi-desktop" severity="secondary" @click="openAgentById(selectedDevice.id)" /></template>
     </Dialog>
+    <DeviceAgentDialog v-model:visible="showAgentDialog" :device="agentDevice" @changed="refreshAgents" />
   </div>
 </template>
 
@@ -361,10 +401,15 @@ import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
+import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 import api from '@/api'
 import type { DeviceRecord, IPAddress, IPChangeHistory } from '@/types'
 import { countGroup, groupValue, sortByGroup, type GroupOption } from '@/utils/grouping'
+import type { DeviceAgent } from '@/types/deviceAgent'
+import DeviceAgentDialog from '@/components/DeviceAgentDialog.vue'
+import DeviceAgentStatus from '@/components/DeviceAgentStatus.vue'
+import { agentErrorMessage, agentIPv4, formatAgentDate, useDeviceAgentPresence } from '@/components/deviceAgentState'
 
 interface IPBandParts {
   valid: boolean
@@ -394,6 +439,64 @@ interface IPBandRow extends IPBandParts {
 
 const route = useRoute()
 const toast = useToast()
+const { agents, loaded: agentsLoaded, stale: agentsStale, lastUpdated: agentsUpdatedAt, error: agentsError, refresh: refreshAgents } = useDeviceAgentPresence()
+const agentDevice = ref<DeviceRecord | null>(null)
+const showAgentDialog = ref(false)
+const openingAgentId = ref<number | null>(null)
+const observedAgents = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase('ko-KR')
+  return agents.value.filter(agent => !['revoked', 'uninstalled'].includes(agent.status) && (!query || [agent.hostname, agent.serial_number, agent.observed_ip, ...agentIPv4(agent), ...agentMacs(agent)].join(' ').toLocaleLowerCase('ko-KR').includes(query)))
+})
+const ipAttentionCount = computed(() => observedAgents.value.filter(needsIpReview).length)
+function agentMacs(agent: DeviceAgent) { return [...new Set(agent.network_adapters.map(adapter => adapter.macAddress).filter((mac): mac is string => Boolean(mac)))] }
+function monitorStatus(agent: DeviceAgent): 'normal' | 'mismatch' | 'unknown' {
+  const monitor = agent.network_monitor
+  if (!monitor || !agentsLoaded.value || agentsStale.value || agent.status !== 'online' || monitor.stale || monitor.reference_pending || monitor.reference_error) return 'unknown'
+  return monitor.status === 'normal' || monitor.status === 'mismatch' ? monitor.status : 'unknown'
+}
+function monitorLabel(agent: DeviceAgent) {
+  const monitor = agent.network_monitor
+  if (monitor?.reference_error) return '기준 IP 형식 확인 필요'
+  if (monitor?.reference_pending) return '변경된 기준 재확인 대기'
+  return { normal: '최근 관측 기준 일치', mismatch: 'IP 불일치 확인 필요', unknown: '현재 상태 확인 불가' }[monitorStatus(agent)]
+}
+function monitorSeverity(agent: DeviceAgent): 'success' | 'warn' | 'secondary' {
+  return monitorStatus(agent) === 'normal' ? 'success' : monitorStatus(agent) === 'mismatch' || agent.network_monitor?.reference_error ? 'warn' : 'secondary'
+}
+function monitorDetail(agent: DeviceAgent) {
+  const monitor = agent.network_monitor
+  if (!monitor) return '아직 IP 비교 관측이 없습니다.'
+  if (monitor.reference_error) return '저장된 기준 IP 형식을 확인하세요. 입력값은 자동 변경하지 않습니다.'
+  if (monitor.reference_pending) return '기준 변경 후 새 관측을 기다립니다. 이전 정상 판정은 현재 상태가 아닙니다.'
+  if (monitorStatus(agent) === 'unknown') return '최신 관측을 확인할 수 없습니다. 이전 정상 또는 복구 상태를 현재로 판단하지 않습니다.'
+  if (monitorStatus(agent) === 'mismatch') return '관측된 IP가 기준과 다릅니다. 변경 시도나 작업자를 확인한 것은 아닙니다.'
+  return '최신 관측에서 기준 IP가 일치합니다. 점검 완료 여부는 아래 기록을 확인하세요.'
+}
+function monitorSource(agent: DeviceAgent) {
+  return agent.network_monitor?.source === 'inventory' ? '디바이스 입력값' : agent.network_monitor?.source === 'first_seen' ? '최초 관측 기준' : '기준 없음'
+}
+function needsIpReview(agent: DeviceAgent) {
+  const monitor = agent.network_monitor
+  return Boolean(monitor?.reference_error || monitor?.alert_active || monitorStatus(agent) === 'mismatch' || (monitor?.review && monitor.review.state !== 'resolved'))
+}
+function reviewLabel(agent: DeviceAgent) {
+  const state = agent.network_monitor?.review?.state
+  return state === 'resolved' ? '점검 기록: 조치 완료' : state === 'reviewing' ? '점검 기록: 점검 중' : '점검 기록: 확인 대기'
+}
+function reviewSeverity(agent: DeviceAgent): 'success' | 'info' | 'warn' {
+  const state = agent.network_monitor?.review?.state
+  return state === 'resolved' ? 'success' : state === 'reviewing' ? 'info' : 'warn'
+}
+async function openAgentById(id: number) {
+  if (openingAgentId.value !== null) return
+  openingAgentId.value = id
+  try {
+    agentDevice.value = devices.value.find(device => device.id === id) || (await api.get<DeviceRecord>(`/devices/${id}`)).data
+    showDetail.value = false
+    showAgentDialog.value = true
+  } catch (reason) { toast.add({ severity: 'error', summary: 'PC 정보 조회 실패', detail: await agentErrorMessage(reason), life: 5000 }) }
+  finally { openingAgentId.value = null }
+}
 const devices = ref<DeviceRecord[]>([])
 const ipItems = ref<IPAddress[]>([])
 const allIpItems = ref<IPAddress[]>([])
@@ -407,6 +510,12 @@ const ipTotal = ref(0)
 const historyPage = ref(1)
 const historySize = ref(20)
 const historyTotal = ref(0)
+const historySource = ref<string | null>(null)
+const historySourceOptions = [
+  { label: '에이전트 관측', value: 'agent' },
+  { label: '디바이스 입력값', value: 'device' },
+  { label: '수동 IP 주소 대장', value: 'ip_address' },
+]
 const search = ref('')
 const filterStatus = ref<string | null>(null)
 const groupField = ref<string | null>(null)
@@ -768,6 +877,7 @@ async function loadHistory() {
   try {
     const params: any = { page: historyPage.value, size: historySize.value }
     if (search.value) params.search = search.value
+    if (historySource.value) params.source_type = historySource.value
     const { data } = await api.get('/ip-change-history', { params })
     historyItems.value = data.items
     historyTotal.value = data.total
@@ -791,6 +901,11 @@ function onPage(e: any) {
 
 function onHistoryPage(e: any) {
   historyPage.value = e.page + 1
+  void loadHistory()
+}
+
+function changeHistorySource() {
+  historyPage.value = 1
   void loadHistory()
 }
 
@@ -852,7 +967,27 @@ function ipStatusSeverity(value: string): any {
 }
 
 function sourceLabel(value: string) {
-  return value === 'device' ? '디바이스 IP/MAC' : 'IP 주소 대장'
+  const labels: Record<string, string> = { agent: '에이전트 관측', device: '디바이스 입력값', ip_address: '수동 IP 주소 대장' }
+  return labels[value] ?? '기록 출처 확인 필요'
+}
+
+function historyObservationText(item: IPChangeHistory) {
+  const note = item.notes || ''
+  const jsonStart = note.indexOf('{')
+  if (jsonStart < 0) return note
+  try {
+    const detail = JSON.parse(note.slice(jsonStart)) as { adapter_id?: string; adapter_name?: string; reference_ip?: string | null; before?: { ipv4?: Array<{ address: string; netmask: string }>; ipv6?: string[] }; after?: { ipv4?: Array<{ address: string; netmask: string }>; ipv6?: string[] } }
+    const ipv4 = (snapshot?: typeof detail.before) => (snapshot?.ipv4 || []).map(entry => `${entry.address} / ${entry.netmask}`).join(', ') || '관측 없음'
+    return [
+      '장비 관측 기록입니다. 변경 시도·작업자 정보가 아닙니다.',
+      `어댑터: ${detail.adapter_name || detail.adapter_id || '확인 불가'}`,
+      `당시 디바이스 입력 IP: ${detail.reference_ip || '미등록'}`,
+      `이전 IPv4 / 서브넷 마스크: ${ipv4(detail.before)}`,
+      `관측 IPv4 / 서브넷 마스크: ${ipv4(detail.after)}`,
+      `이전 IPv6: ${(detail.before?.ipv6 || []).join(', ') || '관측 없음'}`,
+      `관측 IPv6: ${(detail.after?.ipv6 || []).join(', ') || '관측 없음'}`,
+    ].join('\n')
+  } catch { return note }
 }
 
 function historyTarget(item: IPChangeHistory) {
@@ -866,7 +1001,7 @@ function statusChangeText(item: IPChangeHistory) {
 
 function dateTimeText(value: string | null) {
   if (!value) return '-'
-  return new Date(value).toLocaleString('ko-KR')
+  return formatAgentDate(/(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value.replace(' ', 'T')}Z`)
 }
 
 function bandGroupCount(item: IPBandRow) {
@@ -911,6 +1046,9 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.agent-observations{margin-bottom:20px}.agent-observation-time{font-size:.72rem;color:#94a3b8}.agent-observations :deep(.p-datatable){font-size:.78rem}.agent-observations code{font-size:.73rem}
+.ip-monitor-cell{display:flex;flex-direction:column;align-items:flex-start;gap:.4rem;max-width:320px}.ip-monitor-cell small{line-height:1.5;color:#64748b;overflow-wrap:anywhere}.agent-observations :deep(.p-message){margin-bottom:.8rem}.observation-detail summary{cursor:pointer;color:#1d4ed8;white-space:nowrap}.observation-detail pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;min-width:250px;max-width:440px;line-height:1.6;margin:.6rem 0;color:#475569}
+.ip-monitor-cell :deep(.p-tag){white-space:normal;line-height:1.4;text-align:left}.ip-history-table .change-cell{white-space:normal;flex-wrap:wrap}.ip-history-table code{overflow-wrap:anywhere}
 .page-subtitle{margin-top:0.25rem;color:#64748b;font-size:0.9rem}
 .card-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem}
 .band-rule{margin:0.2rem 0 0;color:#64748b;font-size:0.84rem;font-weight:600;line-height:1.45}

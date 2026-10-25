@@ -1,0 +1,31 @@
+name: Issue requested agent installer ticket
+
+on:
+  push:
+    branches: [main]
+    paths: ['deployment/agent-installer-ticket.json']
+  workflow_dispatch:
+
+concurrency:
+  group: itam-production
+  cancel-in-progress: false
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Register the requested installer hash
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          script: |
+            set -eu
+            cd "$HOME/app-it-manager"
+            git diff --quiet
+            git diff --cached --quiet
+            git pull --ff-only origin main
+            test -f deployment/agent-installer-ticket.json
+            docker compose exec -T backend python scripts/issue_agent_ticket.py - < deployment/agent-installer-ticket.json

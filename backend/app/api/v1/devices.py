@@ -7,6 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.api.deps import get_current_user
+from app.api.v1.inventory_access import require_inventory_editor
+from app.models.device_agent import DeviceAgent
 from app.models.device_inventory import ComputerSetting, Device, DeviceLicense, DeviceUsageHistory
 from app.models.ip_address import IPChangeHistory
 from app.schemas.device_inventory import (
@@ -29,7 +32,7 @@ from app.schemas.device_inventory import (
 )
 from app.services.audit_service import compute_changes, log_action
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _license_summary(item: DeviceLicense | None) -> DeviceLicenseSummary | None:
@@ -301,7 +304,7 @@ def list_devices(
     }
 
 
-@router.post("/devices/bulk-update", response_model=dict)
+@router.post("/devices/bulk-update", response_model=dict, dependencies=[Depends(require_inventory_editor)])
 def bulk_update_devices(data: DeviceBulkUpdateRequest, db: Session = Depends(get_db)):
     device_ids = list(dict.fromkeys(data.device_ids))
     if not device_ids:
@@ -370,7 +373,7 @@ def bulk_update_devices(data: DeviceBulkUpdateRequest, db: Session = Depends(get
     }
 
 
-@router.post("/devices/merge-users", response_model=dict)
+@router.post("/devices/merge-users", response_model=dict, dependencies=[Depends(require_inventory_editor)])
 def merge_device_user_info(data: DeviceUserMergeRequest, db: Session = Depends(get_db)):
     device_ids = list(dict.fromkeys(data.device_ids))
     if not device_ids:
@@ -449,7 +452,7 @@ def get_device(device_id: int, db: Session = Depends(get_db)):
     return _device_response(device)
 
 
-@router.post("/devices", response_model=DeviceResponse, status_code=201)
+@router.post("/devices", response_model=DeviceResponse, status_code=201, dependencies=[Depends(require_inventory_editor)])
 def create_device(data: DeviceCreate, db: Session = Depends(get_db)):
     payload = data.model_dump(exclude={"initial_reason"})
     device = Device(**payload)
@@ -468,7 +471,7 @@ def create_device(data: DeviceCreate, db: Session = Depends(get_db)):
     return _device_response(device)
 
 
-@router.put("/devices/{device_id}", response_model=DeviceResponse)
+@router.put("/devices/{device_id}", response_model=DeviceResponse, dependencies=[Depends(require_inventory_editor)])
 def update_device(device_id: int, data: DeviceUpdate, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -510,18 +513,25 @@ def update_device(device_id: int, data: DeviceUpdate, db: Session = Depends(get_
     return _device_response(device)
 
 
-@router.delete("/devices/{device_id}")
+@router.delete("/devices/{device_id}", dependencies=[Depends(require_inventory_editor)])
 def delete_device(device_id: int, db: Session = Depends(get_db)):
+    # Same lock order as enrollment: inventory identity, then its agent.
+    db.query(Device).filter(Device.id == device_id).update(
+        {Device.updated_at: Device.updated_at}, synchronize_session=False,
+    )
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="디바이스를 찾을 수 없습니다.")
-    log_action(db, "device", device.id, "delete", changes={"serial_number": device.serial_number})
+    if db.query(DeviceAgent.id).filter(DeviceAgent.device_id == device_id).first() is not None:
+        raise HTTPException(status_code=409, detail="에이전트 관리 이력이 있는 장비는 삭제할 수 없습니다. 사용 종료 시 퇴역 상태로 변경해 주세요.")
+    deleted_serial = device.serial_number
     db.delete(device)
-    db.commit()
+    db.flush()
+    log_action(db, "device", device_id, "delete", changes={"serial_number": deleted_serial})
     return {"message": "Device deleted"}
 
 
-@router.post("/devices/{device_id}/reassign", response_model=DeviceResponse)
+@router.post("/devices/{device_id}/reassign", response_model=DeviceResponse, dependencies=[Depends(require_inventory_editor)])
 def reassign_device(device_id: int, data: DeviceReassignRequest, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
@@ -544,7 +554,7 @@ def reassign_device(device_id: int, data: DeviceReassignRequest, db: Session = D
     return _device_response(device)
 
 
-@router.post("/devices/{device_id}/replace", response_model=DeviceResponse, status_code=201)
+@router.post("/devices/{device_id}/replace", response_model=DeviceResponse, status_code=201, dependencies=[Depends(require_inventory_editor)])
 def replace_device(device_id: int, data: DeviceReplaceRequest, db: Session = Depends(get_db)):
     old_device = db.query(Device).filter(Device.id == device_id).first()
     if not old_device:
@@ -624,7 +634,7 @@ def list_device_licenses(
     }
 
 
-@router.post("/device-licenses", response_model=DeviceLicenseResponse, status_code=201)
+@router.post("/device-licenses", response_model=DeviceLicenseResponse, status_code=201, dependencies=[Depends(require_inventory_editor)])
 def create_device_license(data: DeviceLicenseCreate, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == data.device_id).first()
     if not device:
@@ -640,11 +650,13 @@ def create_device_license(data: DeviceLicenseCreate, db: Session = Depends(get_d
     return _license_response(item)
 
 
-@router.put("/device-licenses/{license_id}", response_model=DeviceLicenseResponse)
+@router.put("/device-licenses/{license_id}", response_model=DeviceLicenseResponse, dependencies=[Depends(require_inventory_editor)])
 def update_device_license(license_id: int, data: DeviceLicenseUpdate, db: Session = Depends(get_db)):
     item = db.query(DeviceLicense).filter(DeviceLicense.id == license_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="라이센스 현황을 찾을 수 없습니다.")
+    previous_device_id = item.device_id
+    old_values = {key: getattr(item, key) for key in data.model_dump(exclude_unset=True)}
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
     try:
@@ -652,16 +664,18 @@ def update_device_license(license_id: int, data: DeviceLicenseUpdate, db: Sessio
     except IntegrityError as exc:
         _handle_integrity_error(db, exc)
     db.refresh(item)
-    log_action(db, "device_license", item.id, "update", changes=jsonable_encoder(data.model_dump(exclude_unset=True)))
+    log_action(db, "device_license", item.id, "update", changes=jsonable_encoder({
+        "device_id": item.device_id, "previous_device_id": previous_device_id,
+        "changes": {key: {"old": old_values[key], "new": value} for key, value in data.model_dump(exclude_unset=True).items() if old_values[key] != value}}))
     return _license_response(item)
 
 
-@router.delete("/device-licenses/{license_id}")
+@router.delete("/device-licenses/{license_id}", dependencies=[Depends(require_inventory_editor)])
 def delete_device_license(license_id: int, db: Session = Depends(get_db)):
     item = db.query(DeviceLicense).filter(DeviceLicense.id == license_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="라이센스 현황을 찾을 수 없습니다.")
-    log_action(db, "device_license", item.id, "delete")
+    log_action(db, "device_license", item.id, "delete", changes={"device_id": item.device_id})
     db.delete(item)
     db.commit()
     return {"message": "Device license deleted"}
@@ -688,7 +702,7 @@ def list_computer_settings(
     }
 
 
-@router.post("/computer-settings", response_model=ComputerSettingResponse, status_code=201)
+@router.post("/computer-settings", response_model=ComputerSettingResponse, status_code=201, dependencies=[Depends(require_inventory_editor)])
 def create_computer_setting(data: ComputerSettingCreate, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == data.device_id).first()
     if not device:
@@ -704,11 +718,13 @@ def create_computer_setting(data: ComputerSettingCreate, db: Session = Depends(g
     return _setting_response(item)
 
 
-@router.put("/computer-settings/{setting_id}", response_model=ComputerSettingResponse)
+@router.put("/computer-settings/{setting_id}", response_model=ComputerSettingResponse, dependencies=[Depends(require_inventory_editor)])
 def update_computer_setting(setting_id: int, data: ComputerSettingUpdate, db: Session = Depends(get_db)):
     item = db.query(ComputerSetting).filter(ComputerSetting.id == setting_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="컴퓨터 설정을 찾을 수 없습니다.")
+    previous_device_id = item.device_id
+    old_values = {key: getattr(item, key) for key in data.model_dump(exclude_unset=True)}
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(item, key, value)
     try:
@@ -716,16 +732,18 @@ def update_computer_setting(setting_id: int, data: ComputerSettingUpdate, db: Se
     except IntegrityError as exc:
         _handle_integrity_error(db, exc)
     db.refresh(item)
-    log_action(db, "computer_setting", item.id, "update", changes=jsonable_encoder(data.model_dump(exclude_unset=True)))
+    log_action(db, "computer_setting", item.id, "update", changes=jsonable_encoder({
+        "device_id": item.device_id, "previous_device_id": previous_device_id,
+        "changes": {key: {"old": old_values[key], "new": value} for key, value in data.model_dump(exclude_unset=True).items() if old_values[key] != value}}))
     return _setting_response(item)
 
 
-@router.delete("/computer-settings/{setting_id}")
+@router.delete("/computer-settings/{setting_id}", dependencies=[Depends(require_inventory_editor)])
 def delete_computer_setting(setting_id: int, db: Session = Depends(get_db)):
     item = db.query(ComputerSetting).filter(ComputerSetting.id == setting_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="컴퓨터 설정을 찾을 수 없습니다.")
-    log_action(db, "computer_setting", item.id, "delete")
+    log_action(db, "computer_setting", item.id, "delete", changes={"device_id": item.device_id})
     db.delete(item)
     db.commit()
     return {"message": "Computer setting deleted"}

@@ -8,9 +8,13 @@ if config.config_file_name is not None:
 
 # Import all models so Alembic can detect them
 from app.database import Base
+from app.config import settings
 from app.models import user, category, common, asset, license, subscription
 from app.models import ip_address, certificate, consumable, maintenance
 from app.models import rack, network, audit_log, notification, device_inventory, ai_subscription
+from app.models import device_agent, device_command, auto_enrollment_ticket, auto_enrollment_claim
+
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

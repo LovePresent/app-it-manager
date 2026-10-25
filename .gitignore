@@ -8,9 +8,11 @@ venv/
 # Node
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Data
 backend/data/
+backups/
 *.db
 
 # IDE
