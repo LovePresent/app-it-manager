@@ -16,13 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Preserve database and deploy
+        id: deploy
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.DEV_SERVER_HOST }}
           port: ${{ secrets.DEV_SERVER_PORT }}
           username: ${{ secrets.DEV_SERVER_USER }}
           key: ${{ secrets.DEV_SERVER_SSH_KEY }}
           command_timeout: 20m
+          envs: DEPLOY_RUN_ID,DEPLOY_COMMIT_SHA
           script: |
             set -eu
             APP_DIR="$HOME/app-it-manager"
@@ -48,7 +53,9 @@ jobs:
             chmod 600 "backups/$BACKUP_NAME"
             git diff --quiet
             git diff --cached --quiet
-            git pull --ff-only origin main
+            git fetch origin main
+            test "$(git rev-parse origin/main)" = "$DEPLOY_COMMIT_SHA"
+            git merge --ff-only "$DEPLOY_COMMIT_SHA"
             export ITAM_DATABASE_VOLUME="$DATA_VOLUME"
             python3 - <<'PY'
             from pathlib import Path
@@ -58,6 +65,8 @@ jobs:
                 'AGENT_PUBLIC_URL': 'https://dev.cqv.kr',
                 'AGENT_API_PREFIX': '/manage/it/api/v1/agent',
                 'AGENT_DEPLOYMENT_MODE': 'production',
+                'DEBUG': 'false',
+                'AGENT_INTERNAL_READY_CHECK': 'false',
                 'DATABASE_BACKUP_DIR': '/app/backups',
                 'AGENT_DATABASE_BACKUP_DIR': '/app/backups',
                 'ITAM_DATABASE_VOLUME': os.environ['ITAM_DATABASE_VOLUME'],
@@ -76,8 +85,14 @@ jobs:
                 set +e
                 docker compose logs backend --tail 80
                 if ITAM_BACKEND_IMAGE=app-it-manager-backend:pre-agent-rollback ITAM_FRONTEND_IMAGE=app-it-manager-frontend:pre-agent-rollback docker compose up -d --no-deps --no-build --pull never backend frontend; then
-                  if curl --retry 6 --retry-delay 2 --max-time 5 -fsS http://127.0.0.1:8818/api/health >/dev/null; then
+                  ROLLBACK_READY=0
+                  for attempt in $(seq 1 12); do
+                    if curl --max-time 5 -fsS http://127.0.0.1:8818/api/health >/dev/null; then ROLLBACK_READY=1; break; fi
+                    sleep 2
+                  done
+                  if [ "$ROLLBACK_READY" = 1 ]; then
                     echo 'Deployment failed; previous backend is responding again. Existing database volume was preserved.'
+                    rm -f .agent-deployment-active
                   else
                     echo 'Deployment failed; previous images were started but backend health is not confirmed. Administrator inspection required.'
                   fi
@@ -89,6 +104,7 @@ jobs:
             }
             trap rollback_on_failure EXIT
             DEPLOY_IN_PROGRESS=1
+            printf '%s\n' "$DEPLOY_RUN_ID" > .agent-deployment-active
             docker compose up -d --no-deps backend
             READY=0
             for attempt in $(seq 1 45); do
@@ -101,8 +117,136 @@ jobs:
             docker compose exec -T backend python -m alembic current
             docker compose exec -T backend python -m alembic heads
             docker compose up -d --no-deps frontend
-            curl --retry 8 --retry-delay 2 --max-time 10 -fsS https://dev.cqv.kr/manage/it/api/v1/agent/ready
+            FRONTEND_READY=0
+            for attempt in $(seq 1 20); do
+              if curl --max-time 5 -fsS http://127.0.0.1:9918/manage/it/api/v1/agent/ready >/dev/null; then FRONTEND_READY=1; break; fi
+              sleep 2
+            done
+            test "$FRONTEND_READY" = 1
             docker compose ps
             docker compose logs backend --tail 30
             DEPLOY_IN_PROGRESS=0
             trap - EXIT
+
+      - name: Verify public HTTPS outside the deployment network
+        id: public
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time, urllib.request
+          from pathlib import Path
+          expected_version = json.loads(Path('backend/agent_package/manifest.json').read_text())['version']
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          opener = urllib.request.build_opener(NoRedirect)
+          for attempt in range(12):
+              try:
+                  with opener.open('https://dev.cqv.kr/manage/it/api/v1/agent/ready', timeout=10) as response:
+                      data = json.load(response)
+                  assert data['product'] == 'app-it-manager-agent' and type(data['protocol']) is int and data['protocol'] == 1
+                  assert data['registrationReady'] is True and data['latestAgentVersion'] == expected_version
+                  assert re.fullmatch('[0-9a-f]{64}', data['serverId'])
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                      output.write('server_id='+data['serverId']+'\n')
+                  print('External HTTPS product, protocol, version and server identity verified.')
+                  break
+              except Exception:
+                  if attempt == 11: raise SystemExit('External HTTPS verification failed.')
+                  time.sleep(3)
+          PY
+
+      - name: Pin verified public server identity for internal readiness checks
+        uses: appleboy/ssh-action@v1
+        env:
+          PUBLIC_AGENT_SERVER_ID: ${{ steps.public.outputs.server_id }}
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          envs: PUBLIC_AGENT_SERVER_ID,DEPLOY_RUN_ID
+          script: |
+            set -eu
+            cd "$HOME/app-it-manager"
+            test "$(cat .agent-deployment-active)" = "$DEPLOY_RUN_ID"
+            python3 - <<'PY'
+            import json, os, re, urllib.request
+            from pathlib import Path
+            identity = os.environ['PUBLIC_AGENT_SERVER_ID']
+            assert re.fullmatch('[0-9a-f]{64}', identity)
+            with urllib.request.urlopen('http://127.0.0.1:8818/api/v1/agent/ready', timeout=5) as response:
+                local = json.load(response)
+            assert local['serverId'] == identity and local['registrationReady'] is True
+            path = Path('.env')
+            updates = {'AGENT_INTERNAL_READY_CHECK':'true', 'AGENT_PUBLIC_SERVER_ID':identity}
+            lines = [line for line in path.read_text().splitlines() if line.split('=',1)[0].strip() not in updates]
+            path.write_text('\n'.join(lines+[key+'='+value for key,value in updates.items()])+'\n')
+            path.chmod(0o600)
+            PY
+            docker compose up -d --no-deps backend
+            READY=0
+            for attempt in $(seq 1 30); do
+              if curl --max-time 5 -fsS http://127.0.0.1:8818/api/v1/agent/ready >/dev/null; then READY=1; break; fi
+              sleep 2
+            done
+            test "$READY" = 1
+
+      - name: Confirm pinned production service
+        env:
+          EXPECTED_SERVER_ID: ${{ steps.public.outputs.server_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          with urllib.request.build_opener(NoRedirect).open('https://dev.cqv.kr/manage/it/api/v1/agent/ready', timeout=15) as response:
+              ready = json.load(response)
+          assert ready['registrationReady'] is True and ready['serverId'] == os.environ['EXPECTED_SERVER_ID']
+          print('Production agent service confirmed from outside the server network.')
+          PY
+
+      - name: Complete deployment
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          envs: DEPLOY_RUN_ID
+          script: |
+            set -eu
+            cd "$HOME/app-it-manager"
+            test "$(cat .agent-deployment-active)" = "$DEPLOY_RUN_ID"
+            rm -f .agent-deployment-active
+
+      - name: Restore previous images after failed external verification
+        if: failure() && steps.deploy.outcome != 'skipped'
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          envs: DEPLOY_RUN_ID
+          script: |
+            set -eu
+            cd "$HOME/app-it-manager"
+            if [ ! -f .agent-deployment-active ] || [ "$(cat .agent-deployment-active)" != "$DEPLOY_RUN_ID" ]; then
+              echo 'No unfinished application mutation recorded for this run.'
+              exit 0
+            fi
+            ITAM_BACKEND_IMAGE=app-it-manager-backend:pre-agent-rollback ITAM_FRONTEND_IMAGE=app-it-manager-frontend:pre-agent-rollback docker compose up -d --no-deps --no-build --pull never backend frontend
+            READY=0
+            for attempt in $(seq 1 20); do
+              if curl --max-time 5 -fsS http://127.0.0.1:8818/api/health >/dev/null; then READY=1; break; fi
+              sleep 2
+            done
+            test "$READY" = 1
+            rm -f .agent-deployment-active
+            echo 'Previous backend responds again. Database volume and new data remain preserved.'
