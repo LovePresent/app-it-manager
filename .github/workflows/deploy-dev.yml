@@ -67,25 +67,12 @@ jobs:
             else
               printf '%s\n' '{"check":"host_loopback_tls","result":"tls_or_connection_error"}'
             fi
-            if timeout 15s docker run --rm -i --network bridge --add-host auth.cqv.kr:host-gateway --entrypoint python "$OLD_BACKEND_IMAGE" - <<'PY' 2>/dev/null
-            import http.client, json, socket, ssl
-            connection = None
-            try:
-                connection = http.client.HTTPSConnection('auth.cqv.kr', 443, timeout=5, context=ssl.create_default_context())
-                connection.request('GET', '/application/o/token/', headers={'Connection':'close'})
-                response = connection.getresponse()
-                print(json.dumps({'check':'docker_host_gateway_tls','result':'http_response','httpStatus':response.status}))
-            except Exception as error:
-                code = 'tls_certificate_error' if isinstance(error, ssl.SSLCertVerificationError) else 'timeout' if isinstance(error, TimeoutError) else 'tls_or_connection_error'
-                print(json.dumps({'check':'docker_host_gateway_tls','result':code}))
-            finally:
-                if connection is not None: connection.close()
-            PY
-            then
+            if timeout 25s docker run --rm -i --network bridge --add-host auth.cqv.kr:host-gateway --entrypoint python "$OLD_BACKEND_IMAGE" - --gateway-tls-only < backend/scripts/check_oidc_connectivity.py 2>/dev/null; then
               :
             else
               printf '%s\n' '{"check":"docker_host_gateway_tls","result":"probe_unavailable"}'
             fi
+            docker ps --format '{{.Image}}' | python3 -c 'import json,sys; images=[line.strip().lower() for line in sys.stdin]; count=sum("goauthentik/server" in image or "authentik/server" in image for image in images); print(json.dumps({"check":"colocated_authentik_images","serverImageContainerCount":count}))'
             export ITAM_DATABASE_VOLUME="$DATA_VOLUME"
             python3 - <<'PY'
             from pathlib import Path
