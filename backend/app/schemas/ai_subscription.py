@@ -53,3 +53,11 @@ class AIUsageSubscriptionResponse(AIUsageSubscriptionBase):
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AIUsageSubscriptionListResponse(BaseModel):
+    items: list[AIUsageSubscriptionResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

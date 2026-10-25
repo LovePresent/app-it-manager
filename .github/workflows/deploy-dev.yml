@@ -3,81 +3,106 @@ name: Deploy to Dev Server
 on:
   push:
     branches: [main]
+    paths-ignore: ['deployment/agent-installer-ticket.json']
+  workflow_dispatch:
+
+concurrency:
+  group: itam-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Deploy via SSH
+      - name: Preserve database and deploy
         uses: appleboy/ssh-action@v1
-        env:
-          CI_AUTHENTIK_CLIENT_ID: ${{ secrets.AUTHENTIK_CLIENT_ID }}
-          CI_AUTHENTIK_CLIENT_SECRET: ${{ secrets.AUTHENTIK_CLIENT_SECRET }}
-          CI_SECRET_KEY: ${{ secrets.SECRET_KEY }}
         with:
           host: ${{ secrets.DEV_SERVER_HOST }}
           port: ${{ secrets.DEV_SERVER_PORT }}
           username: ${{ secrets.DEV_SERVER_USER }}
           key: ${{ secrets.DEV_SERVER_SSH_KEY }}
-          envs: CI_AUTHENTIK_CLIENT_ID,CI_AUTHENTIK_CLIENT_SECRET,CI_SECRET_KEY
+          command_timeout: 20m
           script: |
-            set -e
-
+            set -eu
             APP_DIR="$HOME/app-it-manager"
-            echo "=== [1] 앱 디렉토리: $APP_DIR ==="
-
-            if [ ! -d "$APP_DIR" ]; then
-              echo "디렉토리 없음 → git clone"
-              git clone https://github.com/LovePresent/app-it-manager.git "$APP_DIR"
-            fi
-
             cd "$APP_DIR"
-
-            echo "=== [2] git pull ==="
-            git pull origin main
-
-            echo "=== [3] .env 파일 생성 (GitHub Secrets) ==="
-            {
-              echo "DATABASE_URL=sqlite:///./data/itam.db"
-              echo "AUTHENTIK_BASE_URL=https://auth.cqv.kr"
-              printf 'AUTHENTIK_CLIENT_ID=%s\n' "$CI_AUTHENTIK_CLIENT_ID"
-              printf 'AUTHENTIK_CLIENT_SECRET=%s\n' "$CI_AUTHENTIK_CLIENT_SECRET"
-              echo "AUTHENTIK_REDIRECT_URI=https://dev.cqv.kr/manage/it/api/v1/auth/callback"
-              echo "AUTHENTIK_JWKS_URL=https://auth.cqv.kr/application/o/itam/jwks/"
-              echo "AUTHENTIK_TOKEN_URL=https://auth.cqv.kr/application/o/token/"
-              echo "AUTHENTIK_AUTHORIZE_URL=https://auth.cqv.kr/application/o/authorize/"
-              echo "AUTHENTIK_USERINFO_URL=https://auth.cqv.kr/application/o/userinfo/"
-              printf 'SECRET_KEY=%s\n' "$CI_SECRET_KEY"
-              echo 'CORS_ORIGINS=["https://dev.cqv.kr"]'
-              echo "FRONTEND_URL=https://dev.cqv.kr/manage/it"
-              echo "QR_BASE_URL=https://dev.cqv.kr/manage/it"
-              echo "ASSET_TAG_PREFIX=IT"
-              echo 'ADMIN_EMAILS=["it.j@cqv.kr"]'
-            } > "$APP_DIR/.env"
-
-            echo "=== [4] docker compose build ==="
-            docker compose build --no-cache
-
-            echo "=== [5] docker compose up ==="
-            docker compose up -d
-
-            echo "=== [6] 불필요한 이미지 정리 ==="
-            docker system prune -f
-
-            echo "=== [7] 컨테이너 상태 ==="
+            test -f .env
+            BACKEND_CONTAINER="$(docker compose ps -q backend)"
+            test -n "$BACKEND_CONTAINER"
+            OLD_BACKEND_IMAGE="$(docker inspect --format '{{.Image}}' "$BACKEND_CONTAINER")"
+            docker tag "$OLD_BACKEND_IMAGE" app-it-manager-backend:pre-agent-rollback
+            FRONTEND_CONTAINER="$(docker compose ps -q frontend)"
+            test -n "$FRONTEND_CONTAINER"
+            OLD_FRONTEND_IMAGE="$(docker inspect --format '{{.Image}}' "$FRONTEND_CONTAINER")"
+            docker tag "$OLD_FRONTEND_IMAGE" app-it-manager-frontend:pre-agent-rollback
+            DATA_VOLUME="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}{{end}}{{end}}' "$BACKEND_CONTAINER")"
+            test -n "$DATA_VOLUME"
+            case "$DATA_VOLUME" in *[!a-zA-Z0-9_.-]*) exit 1;; esac
+            docker volume inspect "$DATA_VOLUME" >/dev/null
+            mkdir -p backups
+            BACKUP_NAME="itam_pre_agent_deploy_$(date -u +%Y%m%dT%H%M%SZ).db"
+            docker compose exec -T backend python -c "import sqlite3,pathlib; from app.config import settings; assert settings.DATABASE_URL=='sqlite:///./data/itam.db'; p=pathlib.Path('/app/data/itam.db'); assert p.is_file(); s=sqlite3.connect('file:'+str(p)+'?mode=ro',uri=True); assert s.execute('PRAGMA quick_check').fetchone()[0]=='ok'; t=sqlite3.connect('/tmp/itam-pre-agent-deploy.db'); s.backup(t); t.close(); s.close()"
+            docker cp "$BACKEND_CONTAINER:/tmp/itam-pre-agent-deploy.db" "backups/$BACKUP_NAME"
+            test -s "backups/$BACKUP_NAME"
+            chmod 600 "backups/$BACKUP_NAME"
+            git diff --quiet
+            git diff --cached --quiet
+            git pull --ff-only origin main
+            export ITAM_DATABASE_VOLUME="$DATA_VOLUME"
+            python3 - <<'PY'
+            from pathlib import Path
+            import os
+            path = Path('.env')
+            updates = {
+                'AGENT_PUBLIC_URL': 'https://dev.cqv.kr',
+                'AGENT_API_PREFIX': '/manage/it/api/v1/agent',
+                'AGENT_DEPLOYMENT_MODE': 'production',
+                'DATABASE_BACKUP_DIR': '/app/backups',
+                'AGENT_DATABASE_BACKUP_DIR': '/app/backups',
+                'ITAM_DATABASE_VOLUME': os.environ['ITAM_DATABASE_VOLUME'],
+            }
+            lines = path.read_text().splitlines()
+            lines = [line for line in lines if line.split('=', 1)[0].strip() not in updates]
+            path.write_text('\n'.join(lines + [key+'='+value for key,value in updates.items()])+'\n')
+            path.chmod(0o600)
+            PY
+            docker compose build
+            DEPLOY_IN_PROGRESS=0
+            rollback_on_failure() {
+              DEPLOY_EXIT=$?
+              trap - EXIT
+              if [ "$DEPLOY_EXIT" != 0 ] && [ "$DEPLOY_IN_PROGRESS" = 1 ]; then
+                set +e
+                docker compose logs backend --tail 80
+                if ITAM_BACKEND_IMAGE=app-it-manager-backend:pre-agent-rollback ITAM_FRONTEND_IMAGE=app-it-manager-frontend:pre-agent-rollback docker compose up -d --no-deps --no-build --pull never backend frontend; then
+                  if curl --retry 6 --retry-delay 2 --max-time 5 -fsS http://127.0.0.1:8818/api/health >/dev/null; then
+                    echo 'Deployment failed; previous backend is responding again. Existing database volume was preserved.'
+                  else
+                    echo 'Deployment failed; previous images were started but backend health is not confirmed. Administrator inspection required.'
+                  fi
+                else
+                  echo 'Deployment and image rollback both failed. Administrator inspection required; database was not reset.'
+                fi
+              fi
+              exit "$DEPLOY_EXIT"
+            }
+            trap rollback_on_failure EXIT
+            DEPLOY_IN_PROGRESS=1
+            docker compose up -d --no-deps backend
+            READY=0
+            for attempt in $(seq 1 45); do
+              if curl --max-time 5 -fsS http://127.0.0.1:8818/api/v1/agent/ready >/dev/null; then READY=1; break; fi
+              sleep 2
+            done
+            if [ "$READY" != 1 ]; then
+              exit 1
+            fi
+            docker compose exec -T backend python -m alembic current
+            docker compose exec -T backend python -m alembic heads
+            docker compose up -d --no-deps frontend
+            curl --retry 8 --retry-delay 2 --max-time 10 -fsS https://dev.cqv.kr/manage/it/api/v1/agent/ready
             docker compose ps
-
-            echo "=== [8] backend 로그 (최근 50줄) ==="
-            docker compose logs --tail 50 backend
-
-            echo "=== [9] frontend 로그 (최근 30줄) ==="
-            docker compose logs --tail 30 frontend
-
-            echo "=== [10] 헬스체크 ==="
-            sleep 5
-            curl -sf http://localhost:8818/api/health && echo "✅ Backend 정상" || echo "❌ Backend 응답 없음"
-            curl -sf http://localhost:9918 && echo "✅ Frontend 정상" || echo "❌ Frontend 응답 없음"
-
-            echo "=== ✅ 배포 완료 ==="
+            docker compose logs backend --tail 30
+            DEPLOY_IN_PROGRESS=0
+            trap - EXIT

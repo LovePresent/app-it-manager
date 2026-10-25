@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.ai_subscription import AIUsageSubscription
 from app.schemas.ai_subscription import (
     AIUsageSubscriptionCreate,
+    AIUsageSubscriptionListResponse,
     AIUsageSubscriptionResponse,
     AIUsageSubscriptionUpdate,
 )
@@ -15,7 +16,7 @@ from app.services.audit_service import log_action
 router = APIRouter()
 
 
-@router.get("/ai-subscriptions", response_model=dict)
+@router.get("/ai-subscriptions", response_model=AIUsageSubscriptionListResponse)
 def list_ai_subscriptions(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=1000),

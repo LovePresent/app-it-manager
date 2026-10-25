@@ -18,6 +18,8 @@
       <div class="summary-item"><span>교체됨</span><strong>{{ replacedCount }}</strong></div>
     </div>
 
+    <AgentFleetPanel @inventory-changed="onAgentInventoryChanged" />
+
     <nav class="device-type-subbar" aria-label="디바이스 종류">
       <button
         v-for="item in deviceTypeNavItems"
@@ -370,6 +372,7 @@
 </template>
 
 <script setup lang="ts">
+import AgentFleetPanel from '@/components/AgentFleetPanel.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -649,6 +652,15 @@ async function load(reset = true) {
     }
   }
 }
+
+let agentInventoryRefreshPending = false
+function onAgentInventoryChanged() {
+  if (loading.value) { agentInventoryRefreshPending = true; return }
+  void load(true)
+}
+watch(loading, value => {
+  if (!value && agentInventoryRefreshPending) { agentInventoryRefreshPending = false; void load(true) }
+})
 
 async function loadOrgOptions() {
   const [deptRes, locRes] = await Promise.all([

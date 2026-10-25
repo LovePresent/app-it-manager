@@ -15,4 +15,4 @@ RUN mkdir -p /app/data/qr_codes
 
 EXPOSE 8818
 
-CMD ["sh", "-c", "python seed_categories.py && uvicorn app.main:app --host 0.0.0.0 --port 8818"]
+CMD ["sh", "-c", "python scripts/migrate_agent_release.py && python ensure_agent_key.py && python seed_categories.py && uvicorn app.main:app --host 0.0.0.0 --port 8818"]

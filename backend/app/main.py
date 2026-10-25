@@ -9,6 +9,7 @@ from app.database import engine, Base
 from app.models import user, category, common, asset, license, subscription
 from app.models import ip_address, certificate, consumable, maintenance
 from app.models import rack, network, audit_log, notification, device_inventory, ai_subscription
+from app.models import device_agent, device_command, auto_enrollment_ticket, auto_enrollment_claim
 
 DATA_DIR = Path("data")
 QR_CODES_DIR = DATA_DIR / "qr_codes"
@@ -16,8 +17,8 @@ QR_CODES_DIR = DATA_DIR / "qr_codes"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables on startup (dev convenience; use Alembic in production)
-    Base.metadata.create_all(bind=engine)
+    # Schema adoption and migrations run through the backup/preservation guard.
+    # Never silently initialize or repair a production database here.
     DATA_DIR.mkdir(exist_ok=True)
     QR_CODES_DIR.mkdir(parents=True, exist_ok=True)
     yield
@@ -41,7 +42,7 @@ app.add_middleware(
 
 # Expose only generated QR images. Do not serve the whole data directory,
 # because it also contains the SQLite database file.
-app.mount("/static/qr_codes", StaticFiles(directory=QR_CODES_DIR), name="qr_codes")
+app.mount("/static/qr_codes", StaticFiles(directory=QR_CODES_DIR, check_dir=False), name="qr_codes")
 
 # Import and register routers
 from app.api.v1 import (
@@ -68,6 +69,7 @@ from app.api.v1 import (
     audit_logs,
     users,
     system,
+    device_agents,
 )
 
 api_prefix = settings.API_V1_PREFIX
@@ -77,6 +79,7 @@ if settings.LOCAL_LOGIN_ENABLED:
     app.include_router(local_auth.router, prefix=api_prefix, tags=["Local Auth"])
 app.include_router(dashboard.router, prefix=api_prefix, tags=["Dashboard"])
 app.include_router(devices.router, prefix=api_prefix, tags=["Devices"])
+app.include_router(device_agents.router, prefix=api_prefix, tags=["Device Agents"])
 app.include_router(assets.router, prefix=api_prefix, tags=["Assets"])
 app.include_router(categories.router, prefix=api_prefix, tags=["Categories"])
 app.include_router(locations.router, prefix=api_prefix, tags=["Locations"])

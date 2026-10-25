@@ -6,10 +6,11 @@ import type { Notification } from '@/types'
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref<Notification[]>([])
   const unreadCount = ref(0)
+  const pendingReads = new Map<number, Promise<void>>()
 
   async function fetchUnreadCount() {
     try {
-      const { data } = await api.get('/notifications/unread-count')
+      const { data } = await api.get('/notifications/unread-count', { skipGlobalLoading: true })
       unreadCount.value = data.count
     } catch {
       // silent
@@ -23,14 +24,23 @@ export const useNotificationStore = defineStore('notification', () => {
   }
 
   async function markRead(id: number) {
-    await api.patch(`/notifications/${id}/read`)
-    const n = notifications.value.find((n) => n.id === id)
-    if (n) n.is_read = true
-    unreadCount.value = Math.max(0, unreadCount.value - 1)
+    const pending = pendingReads.get(id)
+    if (pending) return pending
+    const known = notifications.value.find((item) => item.id === id)
+    if (known?.is_read) return
+    const operation = (async () => {
+      await api.post('/notifications/mark-read', { ids: [id] }, { skipGlobalLoading: true })
+      const item = notifications.value.find((notification) => notification.id === id)
+      if (item) item.is_read = true
+      // The server owns the count; another session may already have read this alert.
+      await fetchUnreadCount()
+    })()
+    pendingReads.set(id, operation)
+    try { await operation } finally { pendingReads.delete(id) }
   }
 
   async function markAllRead() {
-    await api.patch('/notifications/read-all')
+    await api.post('/notifications/mark-all-read', undefined, { skipGlobalLoading: true })
     notifications.value.forEach((n) => (n.is_read = true))
     unreadCount.value = 0
   }

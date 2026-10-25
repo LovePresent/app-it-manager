@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from pathlib import Path
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -9,6 +10,12 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite:///./data/itam.db"
+    AGENT_DATABASE_BACKUP_DIR: str = "data/agent-backups"
+    AGENT_DEPLOYMENT_MODE: Literal["production", "development"] = "production"
+    AGENT_PUBLIC_URL: str = ""
+    AGENT_API_PREFIX: Literal["/api/v1/agent", "/manage/it/api/v1/agent"] = "/api/v1/agent"
+    AGENT_ENROLLMENT_SECRET: str = ""
+    AGENT_ENROLLMENT_SECRET_FILE: str = "data/agent-enrollment.key"
 
     # Authentik OIDC
     AUTHENTIK_BASE_URL: str = "https://auth.example.com"

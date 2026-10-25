@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.database import SessionLocal, engine, Base
+from app.database import SessionLocal
 from app.models.category import AssetCategory
 
 # Import all models to register them
@@ -43,7 +43,6 @@ CATEGORIES = [
 
 
 def seed():
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         existing = db.query(AssetCategory).count()
