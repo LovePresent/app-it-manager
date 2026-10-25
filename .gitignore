@@ -13,6 +13,7 @@ dist/
 # Data
 backend/data/
 backups/
+.agent-deployment-active
 *.db
 
 # IDE

@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from app.main import app
 from app.api.deps import get_current_user
-from app.config import settings
+from app.config import Settings, settings
 from app.database import get_db
 from app.models.auto_enrollment_ticket import AutoEnrollmentTicket
 from app.models.device_agent import DeviceAgent
@@ -28,6 +28,20 @@ SERVER_ID = connection.server_id(bytes(range(32)))
 
 
 class AgentConnectionValidationTest(unittest.TestCase):
+    def test_internal_probe_is_disabled_by_default_and_requires_a_matching_public_pin(self):
+        self.assertIs(Settings.model_fields["AGENT_INTERNAL_READY_CHECK"].default, False)
+        self.assertEqual(Settings.model_fields["AGENT_PUBLIC_SERVER_ID"].default, "")
+        with patch.object(settings, "AGENT_PUBLIC_URL", ORIGIN), patch.object(settings, "AGENT_API_PREFIX", PREFIX), \
+                patch.object(settings, "AGENT_DEPLOYMENT_MODE", "production"), patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), \
+                patch("app.services.auto_enrollment_service.enrollment_key", return_value=bytes(range(32))):
+            for pin in ("", "a" * 63, "not-a-fingerprint", "0" * 64):
+                with self.subTest(pin=pin), patch.object(settings, "AGENT_PUBLIC_SERVER_ID", pin), self.assertRaises(HTTPException) as rejected:
+                    connection.configured_connection(ORIGIN)
+                self.assertEqual(rejected.exception.status_code, 503)
+            with patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID):
+                value = connection.configured_connection()
+                self.assertEqual(value, {"serverUrl": ORIGIN, "apiPrefix": PREFIX, "deploymentMode": "production"})
+
     def test_production_accepts_only_explicit_https_nonloopback_origins_and_known_prefixes(self):
         for prefix in ("/api/v1/agent", PREFIX):
             value = connection.validate_connection(ORIGIN, prefix, "production")
@@ -54,6 +68,16 @@ class AgentConnectionValidationTest(unittest.TestCase):
 
 
 class ProductionReadinessProbeTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        for key, value in (("AGENT_INTERNAL_READY_CHECK", False), ("AGENT_PUBLIC_SERVER_ID", ""),
+                           ("AGENT_PUBLIC_URL", ORIGIN), ("AGENT_API_PREFIX", PREFIX), ("AGENT_DEPLOYMENT_MODE", "production")):
+            setting = patch.object(settings, key, value)
+            setting.start()
+            self.addCleanup(setting.stop)
+        key = patch("app.services.auto_enrollment_service.enrollment_key", return_value=bytes(range(32)))
+        key.start()
+        self.addCleanup(key.stop)
+
     def config(self):
         return {"serverUrl": ORIGIN, "apiPrefix": PREFIX, "deploymentMode": "production", "expectedServerId": SERVER_ID}
 
@@ -101,14 +125,59 @@ class ProductionReadinessProbeTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(connection.httpx, "AsyncClient", side_effect=AssertionError("Unexpected external request")):
             await connection.verify_public_readiness({"serverUrl": "http://localhost:3000", "apiPrefix": "/api/v1/agent", "deploymentMode": "development"})
 
+    async def test_pinned_internal_probe_changes_only_the_server_side_probe_destination(self):
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json=self.payload())
+        with patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID):
+            before = self.config()
+            options = await self.run_probe(handler)
+            self.assertEqual(self.config(), before)
+            self.assertEqual(connection.configured_connection()["serverUrl"], ORIGIN)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(str(requests[0].url), "http://127.0.0.1:8818/api/v1/agent/ready")
+        self.assertEqual(requests[0].method, "GET")
+        self.assertNotIn("authorization", requests[0].headers)
+        self.assertEqual(requests[0].content, b"")
+        self.assertFalse(options[0]["follow_redirects"])
+        self.assertFalse(options[0]["trust_env"])
+
+    async def test_internal_probe_never_sends_a_request_without_the_exact_public_and_local_binding(self):
+        with patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), \
+                patch.object(connection.httpx, "AsyncClient", side_effect=AssertionError("Unverified probe was attempted")):
+            for pin in ("", "0" * 64, "invalid"):
+                with self.subTest(pin=pin), patch.object(settings, "AGENT_PUBLIC_SERVER_ID", pin), self.assertRaises(HTTPException) as rejected:
+                    await connection.verify_public_readiness(self.config())
+                self.assertEqual(rejected.exception.status_code, 503)
+            with patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID):
+                for field, value in (("expectedServerId", "0" * 64), ("serverUrl", "https://other.example.test"), ("apiPrefix", "/api/v1/agent")):
+                    with self.subTest(field=field), self.assertRaises(HTTPException) as rejected:
+                        await connection.verify_public_readiness({**self.config(), field: value})
+                    self.assertEqual(rejected.exception.status_code, 503)
+
+    async def test_internal_probe_keeps_readiness_and_identity_checks_and_refuses_redirects(self):
+        with patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID):
+            for status, payload in ((302, self.payload()), (200, {**self.payload(), "serverId": "0" * 64}),
+                                    (200, {**self.payload(), "protocol": 2}), (200, {**self.payload(), "registrationReady": False})):
+                with self.subTest(status=status, payload=payload), self.assertRaises(HTTPException) as rejected:
+                    await self.run_probe(lambda request: httpx.Response(status, json=payload, headers={"Location": ORIGIN}))
+                self.assertEqual(rejected.exception.status_code, 503)
+
 
 class AgentProductionApiTest(AgentApiFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.package_patch = patch("app.services.agent_installer_service.verify_package_ready", return_value=None)
         self.package_ready = self.package_patch.start()
+        self.internal_probe = patch.object(settings, "AGENT_INTERNAL_READY_CHECK", False)
+        self.public_pin = patch.object(settings, "AGENT_PUBLIC_SERVER_ID", "")
+        self.internal_probe.start()
+        self.public_pin.start()
 
     def tearDown(self):
+        self.public_pin.stop()
+        self.internal_probe.stop()
         self.package_patch.stop()
         super().tearDown()
 
@@ -120,6 +189,61 @@ class AgentProductionApiTest(AgentApiFixture, unittest.TestCase):
             "serverTime": "2026-10-25T03:00:00.000Z", "registrationReady": True,
             "latestAgentVersion": "0.5.0", "serverId": SERVER_ID})
         self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(self.builder.call_count, 0)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(DeviceAgent)), 0)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(AutoEnrollmentTicket)), 0)
+
+    def test_pinned_ready_checks_local_identity_without_recursion_and_fails_if_key_changes(self):
+        with patch.object(settings, "AGENT_DEPLOYMENT_MODE", "production"), patch.object(settings, "AGENT_PUBLIC_URL", ORIGIN), \
+                patch.object(settings, "AGENT_API_PREFIX", PREFIX), patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), \
+                patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID), \
+                patch.object(connection.httpx, "AsyncClient", side_effect=AssertionError("Readiness must not probe itself")):
+            response = self.client.get("/api/v1/agent/ready")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["serverId"], SERVER_ID)
+            self.server_key_path.write_bytes(bytes(reversed(range(32))))
+            response = self.client.get("/api/v1/agent/ready")
+            self.assertEqual(response.status_code, 503, response.text)
+            self.assertFalse(response.json()["registrationReady"])
+            self.assertIsNone(response.json()["serverId"])
+        self.assertEqual(self.builder.call_count, 0)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(AutoEnrollmentTicket)), 0)
+
+    def test_pinned_internal_checks_never_embed_loopback_or_private_probe_settings_in_installers(self):
+        real_client = httpx.AsyncClient
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={"product": "app-it-manager-agent", "protocol": 1, "registrationReady": True,
+                "serverTime": "2026-10-25T03:00:00.000Z", "latestAgentVersion": "0.5.0", "serverId": SERVER_ID})
+        def client(**kwargs):
+            return real_client(transport=httpx.MockTransport(handler), **kwargs)
+        with patch.object(settings, "AGENT_DEPLOYMENT_MODE", "production"), patch.object(settings, "AGENT_PUBLIC_URL", ORIGIN), \
+                patch.object(settings, "AGENT_API_PREFIX", PREFIX), patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True), \
+                patch.object(settings, "AGENT_PUBLIC_SERVER_ID", SERVER_ID), patch.object(connection.httpx, "AsyncClient", side_effect=client):
+            bound = self.issue()
+            response = self.client.post("/api/v1/agents/auto-installer", json={})
+            self.assertEqual(response.status_code, 200, response.text)
+            automatic = response.json()
+        for config in (bound, automatic):
+            self.assertEqual(config["serverUrl"], ORIGIN)
+            self.assertEqual(config["apiPrefix"], PREFIX)
+            self.assertEqual(config["expectedServerId"], SERVER_ID)
+            self.assertEqual(config["deploymentMode"], "production")
+            self.assertNotIn("127.0.0.1", json.dumps(config))
+            self.assertNotIn("AGENT_INTERNAL_READY_CHECK", config)
+            self.assertNotIn("AGENT_PUBLIC_SERVER_ID", config)
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(all(str(request.url) == "http://127.0.0.1:8818/api/v1/agent/ready" for request in requests))
+
+    def test_invalid_internal_pin_blocks_installer_issuance_without_database_changes(self):
+        with patch.object(settings, "AGENT_DEPLOYMENT_MODE", "production"), patch.object(settings, "AGENT_PUBLIC_URL", ORIGIN), \
+                patch.object(settings, "AGENT_API_PREFIX", PREFIX), patch.object(settings, "AGENT_INTERNAL_READY_CHECK", True):
+            for pin in ("", "0" * 64):
+                with patch.object(settings, "AGENT_PUBLIC_SERVER_ID", pin):
+                    self.assertEqual(self.client.post("/api/v1/agents/auto-installer", json={}).status_code, 503)
+                    self.assertEqual(self.client.post(f"/api/v1/devices/{self.device.id}/agent/installer", json={}).status_code, 503)
+                    self.assertEqual(self.client.get("/api/v1/agent/ready").status_code, 503)
         self.assertEqual(self.builder.call_count, 0)
         self.assertEqual(self.db.scalar(select(func.count()).select_from(DeviceAgent)), 0)
         self.assertEqual(self.db.scalar(select(func.count()).select_from(AutoEnrollmentTicket)), 0)

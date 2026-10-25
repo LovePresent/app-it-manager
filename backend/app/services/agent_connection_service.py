@@ -1,6 +1,7 @@
 """Explicit public installer destinations and read-only production preflight."""
 import ipaddress
 import hashlib
+import hmac
 import re
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -12,10 +13,27 @@ from app.config import settings
 
 LATEST_AGENT_VERSION = "0.5.0"
 ALLOWED_API_PREFIXES = {"/api/v1/agent", "/manage/it/api/v1/agent"}
+INTERNAL_READY_URL = "http://127.0.0.1:8818/api/v1/agent/ready"
 
 
 def server_id(key):
     return hashlib.sha256(b"itam-agent-server-id-v1\0" + key).hexdigest()
+
+
+def validated_public_server_id():
+    """Check the externally verified pin locally; never performs HTTP.
+
+    Keeping this synchronous gate separate lets /ready reject a changed key or
+    missing pin without recursively requesting itself.
+    """
+    from app.services.auto_enrollment_service import enrollment_key
+    pinned = settings.AGENT_PUBLIC_SERVER_ID
+    if not isinstance(pinned, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", pinned):
+        raise ValueError("Missing or invalid public server identity pin")
+    pinned = pinned.lower()
+    if not hmac.compare_digest(pinned, server_id(enrollment_key())):
+        raise ValueError("Public server identity no longer matches this deployment")
+    return pinned
 
 
 def validate_connection(origin, prefix, mode):
@@ -55,7 +73,10 @@ def configured_connection(request_origin=None):
     if not origin and mode == "development":
         origin = str(request_origin or "").rstrip("/")
     try:
-        return validate_connection(origin, settings.AGENT_API_PREFIX, mode)
+        connection = validate_connection(origin, settings.AGENT_API_PREFIX, mode)
+        if mode == "production" and settings.AGENT_INTERNAL_READY_CHECK:
+            validated_public_server_id()
+        return connection
     except (ValueError, TypeError) as exc:
         raise HTTPException(503, "에이전트 공개 접속 주소 설정이 올바르지 않습니다. 운영 모드는 명시적인 HTTPS 주소와 API 경로가 필요하며 localhost를 사용할 수 없습니다.") from exc
 
@@ -74,6 +95,12 @@ async def verify_public_readiness(connection):
         if not isinstance(expected_server_id, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_server_id):
             raise ValueError("Missing issuer identity")
         url = checked["serverUrl"] + checked["apiPrefix"] + "/ready"
+        if settings.AGENT_INTERNAL_READY_CHECK:
+            # Public/native configuration remains the independently checked
+            # HTTPS origin. Only this credential-free server-side probe changes.
+            if checked != configured_connection() or not hmac.compare_digest(expected_server_id, validated_public_server_id()):
+                raise ValueError("Internal probe is not bound to the verified public deployment")
+            url = INTERNAL_READY_URL
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False, trust_env=False) as client:
             response = await client.get(url, headers={"Accept": "application/json"})
         if response.status_code != 200:
